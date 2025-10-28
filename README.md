@@ -1,17 +1,15 @@
 # go-crud
 This is a simple CRUD library.
 
-# How It Works
-
 I got tired of endlessly redefining the same boilerplate CRUD code for each item but at the same time I didn't want to use big ORM projects that handle this sort of thing.
 
 I took main idea from: https://andrewpillar.com/archive/programming/2022/10/24/a-simple-crud-library-for-postgresql-with-generics-in-go/
 
+This library should work with any DB but I didn't really test it very extensively so please report back any bugs/improvements/sugegstions.
+
 # Usage
 
-## Generic Repository
-
-### With Reflection
+## With Reflection
 Each CRUD action is mapped to generic repository method. All you need to do is provide your model and embed `Reflection` interface.
 
 ```
@@ -31,8 +29,8 @@ got, err := repo.Get(ctx, id)
 
 `Reflection` interface provides `StructToMap(interface{}) map[string]any` method which converts your struct into a map of struct fields pointers using Reflection. The struct fields pointers are then used in `rows.Scan()` to scan directly into struct.
 
-### Without Reflection
-There is also an option to do this without reflection (even though performance impact seems to be negligeble in benchmarks) but in such case you need to provide `StructToMap(interface{}) map[string]any` method yourself:
+## Without Reflection
+There is also an option to do this without reflection (I've run some benchmarks and performance impact seems to be negligeble) but in such case you need to provide `StructToMap(interface{}) map[string]any` method yourself:
 
 ```
 type ModelWithoutReflection struct {
@@ -61,17 +59,23 @@ repo := NewGenericRepository(db, "devices", func() *ModelWithoutReflection { ret
 got, err := repo.Get(ctx, id)
 ```
 
-### Model constructor
+## Repo init
+After model is redined you can initialize new generic repository: `gocrud.NewGenericRepository[M gocrud.Model](db *sql.DB, table string, callback func() M) *Repository[M]`. It takes three arguments:
 
-Repo init function `NewGenericRepository[M Model](db *sql.DB, table string, callback func() M) *Repository[M]`  takes a callback function which allows to initialize concrete type inside generic method.
+1. DB connection
+2. Name of the table you want this generic repo to call
+3. Callback function
 
-For example: `NewGenericRepository(db, "table_name", func() *ModelWithReflection { return &ModelWithReflection{} })`
+### Why the callback?
+Callback function enables initialization of concrete type inside generic method.
 
-Now whenever a fresh concrete type is needed, for example in generic `Get()` method, the callback function will be executed to get an empty concrete type which can then be filled by response from DB and returned to the caller.
+Callback function should be passed to the repo init like this: `func() *YourModel { return &YourModel{} }`.
+
+Now whenever a fresh concrete type is needed, for example in generic `Get()` method, the callback function will be executed to init a concrete type which can then be filled by response from DB and returned to the caller.
 
 ## Generic Handler
 
-There is also an option to import generic handlers for each CRUD action:
+There is also an option to import and register generic handlers for each CRUD action:
 
 ```
 	gocrud.RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create)
@@ -81,7 +85,13 @@ There is also an option to import generic handlers for each CRUD action:
 	gocrud.RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update)
 ```
 
-You need to provide your own pattern.
+Each CRUD action register method takes three arguments:
+
+1. Pattern
+2. mux
+3. Repository function callback
+
+Checkout `examples` to check full implementation.
 
 ## Examples
 
