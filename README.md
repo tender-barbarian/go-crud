@@ -32,7 +32,7 @@ got, err := repo.Get(ctx, id)
 `Reflection` interface provides `StructToMap(interface{}) map[string]any` method which converts your struct into a map of struct fields pointers using Reflection. The struct fields pointers are then used in `rows.Scan()` to scan directly into struct.
 
 ### Without Reflection
-There is also an option to do this without reflection (even though performance impact seems to be negligeble in benchmarks) but in such case you need to provide `StructToMap(interface{}) map[string]any` method yourself. It is also required when one of your field types does not map to DB type and you need to cast it:
+There is also an option to do this without reflection (even though performance impact seems to be negligeble in benchmarks) but in such case you need to provide `StructToMap(interface{}) map[string]any` method yourself:
 
 ```
 type ModelWithoutReflection struct {
@@ -53,7 +53,7 @@ func (o *ModelWithoutReflection) StructToMap(interface{}) map[string]any {
 		"chip":    &o.Chip,
 		"board":   &o.Board,
 		"ip":      &o.IP,
-		"actions": (*pq.StringArray)(&o.Actions),
+		"actions": &o.Actions,
 	}
 }
 
@@ -61,11 +61,13 @@ repo := NewGenericRepository(db, "devices", func() *ModelWithoutReflection { ret
 got, err := repo.Get(ctx, id)
 ```
 
-### Model factory
+### Model constructor
 
-Anonymous function passed to repo constructor `NewGenericRepository[M Model](db *sql.DB, table string, new func() M) *Repository[M]` is a model factory.
+Repo init function `NewGenericRepository[M Model](db *sql.DB, table string, callback func() M) *Repository[M]`  takes a callback function which allows to initialize concrete type inside generic method.
 
-Once called `model := r.new()` it will initialize a new empty model. It is the only way I know of which allows initialization of concrete type hidden behind generic type.
+For example: `NewGenericRepository(db, "table_name", func() *ModelWithReflection { return &ModelWithReflection{} })`
+
+Now whenever a fresh concrete type is needed, for example in generic `Get()` method, the callback function will be executed to get an empty concrete type which can then be filled by response from DB and returned to the caller.
 
 ## Generic Handler
 
