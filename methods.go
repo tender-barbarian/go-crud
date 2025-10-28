@@ -69,7 +69,7 @@ func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.
 		out, err := f(r.Context())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "resource not found", http.StatusBadRequest)
+				http.Error(w, "resource not found", http.StatusNotFound)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusBadRequest)
