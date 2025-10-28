@@ -3,7 +3,6 @@ package gocrud
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"sync"
 
 	sq "github.com/Masterminds/squirrel"
@@ -14,17 +13,17 @@ type Model interface {
 }
 
 type Repository[M Model] struct {
-	mutex sync.Mutex
-	db    *sql.DB
-	new   func() M
-	table string
+	mutex           sync.Mutex
+	db              *sql.DB
+	getConcreteType func() M
+	table           string
 }
 
-func NewGenericRepository[M Model](db *sql.DB, table string, new func() M) *Repository[M] {
+func NewGenericRepository[M Model](db *sql.DB, table string, callback func() M) *Repository[M] {
 	return &Repository[M]{
-		db:    db,
-		new:   new,
-		table: table,
+		db:              db,
+		getConcreteType: callback,
+		table:           table,
 	}
 }
 
@@ -117,7 +116,7 @@ func (r *Repository[M]) Get(ctx context.Context, id int) (M, error) {
 		return zero, err
 	}
 
-	model := r.new()
+	model := r.getConcreteType()
 	if err := r.set(fields, rows.Scan, model); err != nil {
 		return zero, err
 	}
@@ -157,7 +156,7 @@ func (r *Repository[M]) GetAll(ctx context.Context) ([]M, error) {
 
 	var models []M
 	for rows.Next() {
-		model := r.new()
+		model := r.getConcreteType()
 
 		if err := r.set(fields, rows.Scan, model); err != nil {
 			return nil, err
@@ -206,10 +205,7 @@ func (r *Repository[M]) Update(ctx context.Context, model M, id int) error {
 		return err
 	}
 
-	what, _ := r.db.ExecContext(ctx, query, args...)
-	ids, _ := what.LastInsertId()
-	rows, _ := what.RowsAffected()
-	fmt.Printf("%d %d", ids, rows)
+	_, err = r.db.ExecContext(ctx, query, args...)
 
 	return err
 }
