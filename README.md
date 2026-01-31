@@ -108,6 +108,67 @@ Case in point:
 
 Now, whenever the repository needs to return a `User`, it executes the callback to allocate a new one.
 
+## HTTP Route Registration
+
+`go-crud` provides helper functions to register HTTP handlers for your CRUD operations:
+
+```go
+mux := http.NewServeMux()
+repo := gocrud.NewGenericRepository(db, "items", func() *Item { return &Item{} })
+errw := gocrud.DefaultErrorWriter{}
+
+gocrud.RegisterCreate("POST /items", mux, repo.Create, errw)
+gocrud.RegisterGet("GET /items/{id}", mux, repo.Get, errw)
+gocrud.RegisterGetAll("GET /items", mux, repo.GetAll, errw)
+gocrud.RegisterDelete("DELETE /items/{id}", mux, repo.Delete, errw)
+gocrud.RegisterUpdate("POST /items/{id}", mux, repo.Update, errw)
+```
+
+### Custom Error Handling
+
+The `ErrorWriter` interface allows you to customize how errors are returned to clients:
+
+```go
+type ErrorWriter interface {
+    WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
+}
+```
+
+The `DefaultErrorWriter` uses the custom message if provided, otherwise falls back to `err.Error()`:
+
+```go
+type DefaultErrorWriter struct{}
+
+func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
+    if customMsg != "" {
+        http.Error(w, customMsg, statusCode)
+        return
+    }
+    http.Error(w, err.Error(), statusCode)
+}
+```
+
+To implement custom error handling (e.g., JSON responses, logging), create your own type that implements `ErrorWriter`:
+
+```go
+type JSONErrorWriter struct {
+    Logger *log.Logger
+}
+
+func (j JSONErrorWriter) WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int) {
+    j.Logger.Printf("error: %v", err)
+
+    msg := customMsg
+    if msg == "" && err != nil {
+        msg = err.Error()
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(statusCode)
+    json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+```
+
 ## Notes
 Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
 Contributions, bug reports, and performance improvements are highly appreciated!
