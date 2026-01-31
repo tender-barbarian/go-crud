@@ -2,7 +2,7 @@
 
 A lightweight, generic CRUD library for Go — designed to eliminate repetitive boilerplate code without the overhead of a full ORM.
 
-## ✨ Overview
+## Overview
 
 `go-crud` provides a simple, flexible interface for defining CRUD operations in Go.
 
@@ -17,7 +17,7 @@ Inspired by Andrew Pillar’s excellent article:
 Although designed to work with any SQL database, it has primarily been tested with PostgreSQL.
 If you encounter issues or have improvements, please open an issue or PR — feedback is very welcome!
 
-## 🚀 Usage
+## Usage
 You can use `go-crud` in two ways:
 1. **With reflection** (simpler setup, slightly slower)
 2. **Without reflection** (manual setup, marginally faster)
@@ -82,7 +82,7 @@ repo := gocrud.NewGenericRepository(db, "table_name", func() *ModelWithoutReflec
 got, err := repo.Get(ctx, id)
 ```
 
-## 🧱 Initialization
+## Initialization
 You can create a new generic repository using:
 
 ```
@@ -98,7 +98,7 @@ gocrud.NewGenericRepository[M gocrud.Model](
 2. `table` — the name of the database table to target
 3. `callback` — a function returning a new instance of your model
 
-#### 🔄 Why the Callback?
+#### Why the Callback?
 The callback allows the repository methods to initialize a new instance of the concrete type (your model) at runtime.
 For example, the `Get()` method calls the callback to create a fresh model instance to fill it with data retrieved from the database.
 
@@ -108,6 +108,6 @@ Case in point:
 
 Now, whenever the repository needs to return a `User`, it executes the callback to allocate a new one.
 
-## 🧪 Notes
-Currently tested primarily with PostgreSQL but should be compatible with any SQL database supported by `database/sql`.
+## Notes
+Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
 Contributions, bug reports, and performance improvements are highly appreciated!
