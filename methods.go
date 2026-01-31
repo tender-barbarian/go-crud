@@ -10,19 +10,38 @@ import (
 	"strconv"
 )
 
-func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error)) {
+var (
+	ErrInvalidJSON  = errors.New("invalid json")
+	ErrInvalidParam = errors.New("invalid param")
+)
+
+type ErrorWriter interface {
+	WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
+}
+
+type DefaultErrorWriter struct{}
+
+func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
+	if customMsg != "" {
+		http.Error(w, customMsg, statusCode)
+		return
+	}
+	http.Error(w, err.Error(), statusCode)
+}
+
+func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), errw ErrorWriter) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		out, err := f(r.Context(), in)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			errw.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -36,21 +55,21 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 	})
 }
 
-func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, id int) (Out, error)) {
+func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, id int) (Out, error), errw ErrorWriter) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			http.Error(w, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		out, err := f(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "resource not found", http.StatusNotFound)
+				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			errw.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -64,15 +83,15 @@ func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx conte
 	})
 }
 
-func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.Context) ([]Out, error)) {
+func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.Context) ([]Out, error), errw ErrorWriter) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		out, err := f(r.Context())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "resource not found", http.StatusNotFound)
+				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			errw.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -86,21 +105,21 @@ func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.
 	})
 }
 
-func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, int) error) {
+func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, int) error, errw ErrorWriter) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			http.Error(w, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		err = f(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "resource not found", http.StatusNotFound)
+				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			errw.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -109,29 +128,29 @@ func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, 
 	})
 }
 
-func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error) {
+func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, errw ErrorWriter) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
+			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			http.Error(w, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		err = f(r.Context(), in, id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "resource not found", http.StatusNotFound)
+				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			http.Error(w, "resource not found", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 

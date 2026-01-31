@@ -78,7 +78,7 @@ func TestIntegration_HTTP_Create(t *testing.T) {
 
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterCreate("POST /items", mux, repo.Create)
+	RegisterCreate("POST /items", mux, repo.Create, DefaultErrorWriter{})
 
 	body := `{"name": "HTTP Item", "description": "Created via HTTP", "category": "HTTP"}`
 	req := httptest.NewRequest(http.MethodPost, "/items", strings.NewReader(body))
@@ -114,7 +114,7 @@ func TestIntegration_HTTP_Get(t *testing.T) {
 	seeded := seedTestData(t, db)
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterGet("GET /items/{id}", mux, repo.Get)
+	RegisterGet("GET /items/{id}", mux, repo.Get, DefaultErrorWriter{})
 
 	t.Run("existing item", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items/1", nil)
@@ -147,7 +147,7 @@ func TestIntegration_HTTP_GetAll(t *testing.T) {
 	seeded := seedTestData(t, db)
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterGetAll("GET /items", mux, repo.GetAll)
+	RegisterGetAll("GET /items", mux, repo.GetAll, DefaultErrorWriter{})
 
 	req := httptest.NewRequest(http.MethodGet, "/items", nil)
 	rec := httptest.NewRecorder()
@@ -176,8 +176,8 @@ func TestIntegration_HTTP_Update(t *testing.T) {
 	seedTestData(t, db)
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterUpdate("POST /items/{id}", mux, repo.Update)
-	RegisterGet("GET /items/{id}", mux, repo.Get)
+	RegisterUpdate("POST /items/{id}", mux, repo.Update, DefaultErrorWriter{})
+	RegisterGet("GET /items/{id}", mux, repo.Get, DefaultErrorWriter{})
 
 	body := `{"name": "Updated via HTTP", "description": "Updated", "category": "UPD"}`
 	req := httptest.NewRequest(http.MethodPost, "/items/1", strings.NewReader(body))
@@ -209,8 +209,8 @@ func TestIntegration_HTTP_Delete(t *testing.T) {
 	seedTestData(t, db)
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterDelete("DELETE /items/{id}", mux, repo.Delete)
-	RegisterGetAll("GET /items", mux, repo.GetAll)
+	RegisterDelete("DELETE /items/{id}", mux, repo.Delete, DefaultErrorWriter{})
+	RegisterGetAll("GET /items", mux, repo.GetAll, DefaultErrorWriter{})
 
 	req := httptest.NewRequest(http.MethodDelete, "/items/1", nil)
 	rec := httptest.NewRecorder()
@@ -236,7 +236,7 @@ func TestIntegration_HTTP_CreateInvalidJSON(t *testing.T) {
 
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterCreate("POST /items", mux, repo.Create)
+	RegisterCreate("POST /items", mux, repo.Create, DefaultErrorWriter{})
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/items", strings.NewReader(body))
@@ -254,7 +254,7 @@ func TestIntegration_HTTP_UpdateInvalidJSON(t *testing.T) {
 	seedTestData(t, db)
 	repo := NewGenericRepository(db, "items", func() *TestItem { return &TestItem{} })
 	mux := http.NewServeMux()
-	RegisterUpdate("POST /items/{id}", mux, repo.Update)
+	RegisterUpdate("POST /items/{id}", mux, repo.Update, DefaultErrorWriter{})
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/items/1", strings.NewReader(body))
