@@ -49,7 +49,7 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 		w.WriteHeader(http.StatusCreated)
 		err = json.NewEncoder(w).Encode(map[string]interface{}{"id": out})
 		if err != nil {
-			log.Printf("failed to encode created note: %v", err)
+			log.Printf("failed to encode output: %v", err)
 			return
 		}
 	})
@@ -74,10 +74,10 @@ func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx conte
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 		err = json.NewEncoder(w).Encode(out)
 		if err != nil {
-			log.Printf("failed to encode created note: %v", err)
+			log.Printf("failed to encode output: %v", err)
 			return
 		}
 	})
@@ -96,10 +96,10 @@ func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 		err = json.NewEncoder(w).Encode(out)
 		if err != nil {
-			log.Printf("failed to encode created note: %v", err)
+			log.Printf("failed to encode output: %v", err)
 			return
 		}
 	})
