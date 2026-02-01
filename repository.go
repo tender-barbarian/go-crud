@@ -108,7 +108,7 @@ func (r *Repository[M]) Get(ctx context.Context, id int) (M, error) {
 		if err := rows.Err(); err != nil {
 			return zero, err
 		}
-		return zero, err
+		return zero, sql.ErrNoRows
 	}
 
 	fields, err := rows.Columns()
@@ -171,6 +171,10 @@ func (r *Repository[M]) GetAll(ctx context.Context) ([]M, error) {
 
 	if err = rows.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(models) == 0 {
+		return nil, sql.ErrNoRows
 	}
 
 	return models, nil

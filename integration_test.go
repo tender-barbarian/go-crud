@@ -72,6 +72,17 @@ func seedTestData(t *testing.T, db *sql.DB) []TestItem {
 	return items
 }
 
+// removeTestData deletes test data from the database
+func removeTestData(t *testing.T, db *sql.DB) {
+	_, err := db.Exec(
+		"DELETE FROM items",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegration_HTTP_Create(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -131,6 +142,14 @@ func TestIntegration_HTTP_Get(t *testing.T) {
 		assert.Equal(t, seeded[0].Name, got.Name)
 	})
 
+	t.Run("non existing item", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items/10", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
 	t.Run("invalid id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items/invalid", nil)
 		rec := httptest.NewRecorder()
@@ -149,24 +168,35 @@ func TestIntegration_HTTP_GetAll(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterGetAll("GET /items", mux, repo.GetAll, DefaultErrorWriter{})
 
-	req := httptest.NewRequest(http.MethodGet, "/items", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	t.Run("existing items", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 
-	var got []TestItem
-	err := json.NewDecoder(rec.Body).Decode(&got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Len(t, got, len(seeded))
-	for i, item := range got {
-		assert.Equal(t, seeded[i].ID, item.ID)
-		assert.Equal(t, seeded[i].Name, item.Name)
-		assert.Equal(t, seeded[i].Description, item.Description)
-		assert.Equal(t, seeded[i].Category, item.Category)
-	}
+		var got []TestItem
+		err := json.NewDecoder(rec.Body).Decode(&got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, got, len(seeded))
+		for i, item := range got {
+			assert.Equal(t, seeded[i].ID, item.ID)
+			assert.Equal(t, seeded[i].Name, item.Name)
+			assert.Equal(t, seeded[i].Description, item.Description)
+			assert.Equal(t, seeded[i].Category, item.Category)
+		}
+	})
+
+	t.Run("non existing items", func(t *testing.T) {
+		removeTestData(t, db)
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
 }
 
 func TestIntegration_HTTP_Update(t *testing.T) {
