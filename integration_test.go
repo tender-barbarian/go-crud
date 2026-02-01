@@ -121,7 +121,7 @@ func TestIntegration_HTTP_Get(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusCreated, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 
 		var got TestItem
 		err := json.NewDecoder(rec.Body).Decode(&got)
@@ -153,7 +153,7 @@ func TestIntegration_HTTP_GetAll(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	var got []TestItem
 	err := json.NewDecoder(rec.Body).Decode(&got)
