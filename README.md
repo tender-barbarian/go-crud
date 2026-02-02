@@ -211,7 +211,30 @@ func (i *Item) Validate() error {
 }
 ```
 
-When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body. Models that don't implement `Validatable` skip validation (backward compatible).
+When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body by default. Models that don't implement `Validatable` skip validation (backward compatible).
+
+To customize the error message and HTTP status code, implement the `ValidationError` interface on your error:
+
+```go
+type ValidationError interface {
+    error
+    Message() string
+    StatusCode() int
+}
+
+type NameRequiredError struct{}
+
+func (e NameRequiredError) Error() string      { return "name is required" }
+func (e NameRequiredError) Message() string    { return "name field cannot be empty" }
+func (e NameRequiredError) StatusCode() int    { return http.StatusUnprocessableEntity }
+
+func (i *Item) Validate() error {
+    if i.Name == "" {
+        return NameRequiredError{}
+    }
+    return nil
+}
+```
 
 ## Notes
 Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
