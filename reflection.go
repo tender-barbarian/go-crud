@@ -12,7 +12,11 @@ func (r *Reflection) StructToMap(d interface{}) map[string]any {
 
 	val := reflect.ValueOf(d).Elem()
 	for i := 0; i < val.NumField(); i++ {
-		name := strings.ToLower(val.Type().Field(i).Name)
+		field := val.Type().Field(i)
+		name := field.Tag.Get("db")
+		if name == "" {
+			name = strings.ToLower(field.Name)
+		}
 		if name == "reflection" {
 			continue
 		}

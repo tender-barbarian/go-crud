@@ -59,4 +59,32 @@ func TestReflection_StructToMap(t *testing.T) {
 			t.Errorf("Reflection.StructToMap() = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("Test Struct To Map - with tags", func(t *testing.T) {
+		type Test struct {
+			Test  int     `db:"test_1"`
+			Test2 string  `db:"test_2"`
+			Test3 float32 `db:"test_3"`
+			Test4 []byte  `db:"test_4"`
+		}
+
+		i := &Test{
+			Test:  100,
+			Test2: "test",
+			Test3: 100.11,
+			Test4: []byte{0},
+		}
+
+		want := map[string]any{
+			"test_1": &i.Test,
+			"test_2": &i.Test2,
+			"test_3": &i.Test3,
+			"test_4": &i.Test4,
+		}
+
+		r := &Reflection{}
+		if got := r.StructToMap(i); !reflect.DeepEqual(got, want) {
+			t.Errorf("Reflection.StructToMap() = %v, want %v", got, want)
+		}
+	})
 }
