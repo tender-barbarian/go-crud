@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,13 @@ type Item struct {
 	Kind string `json:"kind"`
 	IP   string `json:"ip"`
 	Reflection
+}
+
+func (i *Item) Validate() error {
+	if i.Name == "" {
+		return errors.New("name is required")
+	}
+	return nil
 }
 
 type genericRepoMock[M Model] struct {
@@ -93,6 +101,26 @@ func TestMethod_Create(t *testing.T) {
 		}
 
 		assert.Equal(t, "invalid json\n", string(errMsg))
+	})
+
+	t.Run("Test generic method: Create() - validation fails", func(t *testing.T) {
+		repo := &genericRepoMock[*Item]{table: "item"}
+		mux := http.NewServeMux()
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorWriter{})
+
+		body := `{"name": ""}`
+		req := httptest.NewRequest(http.MethodPost, "/item", bytes.NewReader([]byte(body)))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+		errMsg, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 }
 
@@ -447,5 +475,25 @@ func TestMethod_Update(t *testing.T) {
 		}
 
 		assert.Equal(t, "invalid param\n", string(errMsg))
+	})
+
+	t.Run("Test generic method: Update() - validation fails", func(t *testing.T) {
+		repo := &genericRepoMock[*Item]{table: "item"}
+		mux := http.NewServeMux()
+		RegisterUpdate("POST /item/{id}", mux, repo.Update, DefaultErrorWriter{})
+
+		body := `{"name": ""}`
+		req := httptest.NewRequest(http.MethodPost, "/item/1", bytes.NewReader([]byte(body)))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+		errMsg, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 }
