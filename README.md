@@ -44,11 +44,26 @@ got, err := repo.Get(ctx, id)
 ```
 
 ### Why the embedded interface?
-`gocrud.Reflection` interface provides a `StructToMap(interface{}) map[string]any` method that converts your struct into a map of `field_name:pointer_to_field` using Go’s reflection.
+`gocrud.Reflection` interface provides a `StructToMap(interface{}) map[string]any` method that converts your struct into a map of `field_name:pointer_to_field` using Go's reflection.
 
 The map keys, which are struct field names, are used to validate against column names returned by the query.
 
 While map values, which are pointers to struct fields, are passed to `rows.Scan()` so your model can be populated.
+
+### Custom Column Names with `db` Tag
+
+By default, field names are lowercased to match database columns. You can override this behavior using the `db` struct tag:
+
+```go
+type User struct {
+    ID        int    `db:"user_id"`      // maps to "user_id" column
+    FirstName string `db:"first_name"`   // maps to "first_name" column
+    LastName  string                     // maps to "lastname" (lowercase field name)
+    gocrud.Reflection
+}
+```
+
+This is useful when your database column names don't match your Go field names (e.g., snake_case columns with PascalCase fields).
 
 ---
 
