@@ -10,15 +10,28 @@ import (
 	"strconv"
 )
 
-var (
-	ErrInvalidJSON  = errors.New("invalid json")
-	ErrInvalidParam = errors.New("invalid param")
-)
-
 // Validatable is an optional interface that models can implement
 // to enable automatic validation after JSON decoding.
 type Validatable interface {
 	Validate() error
+}
+
+// ValidationError is an optional interface that validation errors can implement
+// to provide custom HTTP status codes and messages.
+type ValidationError interface {
+	error
+	Message() string
+	StatusCode() int
+}
+
+func handleValidationError(err error, w http.ResponseWriter, r *http.Request, errw ErrorWriter) {
+	msg := "validation error"
+	code := http.StatusBadRequest
+	if ve, ok := err.(ValidationError); ok {
+		msg = ve.Message()
+		code = ve.StatusCode()
+	}
+	errw.WriteError(w, r, err, msg, code)
 }
 
 type ErrorWriter interface {
@@ -41,13 +54,13 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		if v, ok := any(in).(Validatable); ok {
 			if err := v.Validate(); err != nil {
-				errw.WriteError(w, r, err, "validation error", http.StatusBadRequest)
+				handleValidationError(err, w, r, errw)
 				return
 			}
 		}
@@ -72,7 +85,7 @@ func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx conte
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
@@ -122,7 +135,7 @@ func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, 
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
@@ -147,20 +160,20 @@ func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx con
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		if v, ok := any(in).(Validatable); ok {
 			if err := v.Validate(); err != nil {
-				errw.WriteError(w, r, err, "validation error", http.StatusBadRequest)
+				handleValidationError(err, w, r, errw)
 				return
 			}
 		}
 
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, ErrInvalidParam, "invalid param", http.StatusBadRequest)
+			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
