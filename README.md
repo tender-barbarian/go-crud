@@ -184,6 +184,35 @@ func (j JSONErrorWriter) WriteError(w http.ResponseWriter, r *http.Request, err 
 }
 ```
 
+### Input Validation
+
+Models can optionally implement the `Validatable` interface to enable automatic validation after JSON decoding in `RegisterCreate` and `RegisterUpdate`:
+
+```go
+type Validatable interface {
+    Validate() error
+}
+```
+
+Example:
+
+```go
+type Item struct {
+    ID   int    `json:"id"`
+    Name string `json:"name"`
+    gocrud.Reflection
+}
+
+func (i *Item) Validate() error {
+    if i.Name == "" {
+        return errors.New("name is required")
+    }
+    return nil
+}
+```
+
+When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body. Models that don't implement `Validatable` skip validation (backward compatible).
+
 ## Notes
 Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
 Contributions, bug reports, and performance improvements are highly appreciated!

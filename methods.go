@@ -15,6 +15,12 @@ var (
 	ErrInvalidParam = errors.New("invalid param")
 )
 
+// Validatable is an optional interface that models can implement
+// to enable automatic validation after JSON decoding.
+type Validatable interface {
+	Validate() error
+}
+
 type ErrorWriter interface {
 	WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
 }
@@ -37,6 +43,13 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 		if err != nil {
 			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
 			return
+		}
+
+		if v, ok := any(in).(Validatable); ok {
+			if err := v.Validate(); err != nil {
+				errw.WriteError(w, r, err, "validation error", http.StatusBadRequest)
+				return
+			}
 		}
 
 		out, err := f(r.Context(), in)
@@ -136,6 +149,13 @@ func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx con
 		if err != nil {
 			errw.WriteError(w, r, ErrInvalidJSON, "invalid json", http.StatusBadRequest)
 			return
+		}
+
+		if v, ok := any(in).(Validatable); ok {
+			if err := v.Validate(); err != nil {
+				errw.WriteError(w, r, err, "validation error", http.StatusBadRequest)
+				return
+			}
 		}
 
 		id, err := strconv.Atoi(r.PathValue("id"))
