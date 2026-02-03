@@ -24,15 +24,10 @@ type ValidationError interface {
 	StatusCode() int
 }
 
-// Row represents a single database row that can be scanned.
-type Row interface {
-	Scan(dest ...any) error
-}
-
 // DBQuerier provides database query capabilities for validation.
 type DBQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) Row
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // ValidatableWithDB is an optional interface that models can implement
