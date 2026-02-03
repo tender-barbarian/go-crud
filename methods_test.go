@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,7 +36,7 @@ func (i *Item) Validate() error {
 
 func (i *Item) ValidateWithDB(ctx context.Context, db DBQuerier) error {
 	var exists bool
-	row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
+	row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)", i.Name)
 	if err := row.Scan(&exists); err != nil {
 		return err
 	}
@@ -61,37 +63,40 @@ func (mock *genericRepoMock[M]) Create(_ context.Context, in M) (int, error) {
 	return 1, nil
 }
 
-// mockRow implements the Row interface for testing
-type mockRow struct {
-	exists bool
-	err    error
-}
+// // mockRow implements the Row interface for testing
+// type mockRow struct {
+// 	exists bool
+// 	err    error
+// }
 
-func (r *mockRow) Scan(dest ...any) error {
-	if r.err != nil {
-		return r.err
-	}
-	if len(dest) > 0 {
-		if b, ok := dest[0].(*bool); ok {
-			*b = r.exists
-		}
-	}
-	return nil
-}
+// func (r *mockRow) Scan(dest ...any) error {
+// 	if r.err != nil {
+// 		return r.err
+// 	}
+// 	if len(dest) > 0 {
+// 		if b, ok := dest[0].(*bool); ok {
+// 			*b = r.exists
+// 		}
+// 	}
+// 	return nil
+// }
 
-// mockDBQuerier is a mock implementation of DBQuerier for testing
-type mockDBQuerier struct {
-	exists bool
-	err    error
-}
+// // mockDBQuerier is a mock implementation of DBQuerier for testing
+// type mockDBQuerier struct {
+// 	exists bool
+// 	err    error
+// }
 
-func (m *mockDBQuerier) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
-	return nil, m.err
-}
+// func (m *mockDBQuerier) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+// 	return nil, m.err
+// }
 
-func (m *mockDBQuerier) QueryRowContext(_ context.Context, _ string, _ ...any) Row {
-	return &mockRow{exists: m.exists, err: m.err}
-}
+// func (m *mockDBQuerier) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+// 	rows := sqlmock.NewRows([]string{"id", "name"}).
+// 		AddRow("1", "test")
+
+// 	return rows.
+// }
 
 func TestMethod_Create(t *testing.T) {
 	t.Run("Test generic method: Create()", func(t *testing.T) {
@@ -167,21 +172,37 @@ func TestMethod_Create(t *testing.T) {
 		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 
-	t.Run("Test CreateWithDB - success", func(t *testing.T) {
+	t.Run("Test CreateWithDB - success", func(t *testing.T) { // nolint:dupl
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer db.Close()
+
 		want := &Item{
-			ID:   1,
-			Name: "test",
+			Name: "test 1",
+			Type: "test 2",
+			Tag:  "test 3",
+			Kind: "test 4",
+			IP:   "test 5",
 		}
 
-		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
+		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
+		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(false)
+		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
+
 		mux := http.NewServeMux()
-		RegisterCreateWithDB("POST /item", mux, repo.Create, &mockDBQuerier{}, DefaultErrorWriter{})
+		RegisterCreateWithDB("POST /item", mux, repo.Create, db, DefaultErrorWriter{})
 
 		var buf bytes.Buffer
-		err := json.NewEncoder(&buf).Encode(want)
+		err = json.NewEncoder(&buf).Encode(want)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		mock.ExpectExec(`INSERT INTO item \(((ip)(,)?|(name)(,)?|(type)(,)?|(tag)(,)?|(kind)(,)?){5}\) VALUES \(([?,]+)\)`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		req := httptest.NewRequest(http.MethodPost, "/item", &buf)
 		rec := httptest.NewRecorder()
@@ -192,17 +213,30 @@ func TestMethod_Create(t *testing.T) {
 	})
 
 	t.Run("Test CreateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer db.Close()
+
 		want := &Item{
-			ID:   1,
-			Name: "test",
+			Name: "test 1",
+			Type: "test 2",
+			Tag:  "test 3",
+			Kind: "test 4",
+			IP:   "test 5",
 		}
 
-		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
+		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
+		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(true)
+		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
+
 		mux := http.NewServeMux()
-		RegisterCreateWithDB("POST /item", mux, repo.Create, &mockDBQuerier{exists: true}, DefaultErrorWriter{})
+		RegisterCreateWithDB("POST /item", mux, repo.Create, db, DefaultErrorWriter{})
 
 		var buf bytes.Buffer
-		err := json.NewEncoder(&buf).Encode(want)
+		err = json.NewEncoder(&buf).Encode(want)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,21 +629,37 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 
-	t.Run("Test UpdateWithDB - success", func(t *testing.T) {
+	t.Run("Test UpdateWithDB - success", func(t *testing.T) { // nolint:dupl
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer db.Close()
+
 		want := &Item{
-			ID:   1,
-			Name: "test",
+			Name: "test 1",
+			Type: "test 2",
+			Tag:  "test 3",
+			Kind: "test 4",
+			IP:   "test 5",
 		}
 
-		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
+		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
+		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(false)
+		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
+
 		mux := http.NewServeMux()
-		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, &mockDBQuerier{}, DefaultErrorWriter{})
+		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, db, DefaultErrorWriter{})
 
 		var buf bytes.Buffer
-		err := json.NewEncoder(&buf).Encode(want)
+		err = json.NewEncoder(&buf).Encode(want)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		mock.ExpectExec(`UPDATE item SET (\s?(kind = \?)(,)?|\s?(tag = \?)(,)?|\s?(ip = \?)(,)?|\s?(name = \?)(,)?|\s?(type = \?)(,)?){5} WHERE id = \?`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
 
 		req := httptest.NewRequest(http.MethodPost, "/item/1", &buf)
 		rec := httptest.NewRecorder()
@@ -620,17 +670,30 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 	})
 
 	t.Run("Test UpdateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
+		}
+		defer db.Close()
+
 		want := &Item{
-			ID:   1,
-			Name: "test",
+			Name: "test 1",
+			Type: "test 2",
+			Tag:  "test 3",
+			Kind: "test 4",
+			IP:   "test 5",
 		}
 
-		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
+		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
+		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(true)
+		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
+
 		mux := http.NewServeMux()
-		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, &mockDBQuerier{exists: true}, DefaultErrorWriter{})
+		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, db, DefaultErrorWriter{})
 
 		var buf bytes.Buffer
-		err := json.NewEncoder(&buf).Encode(want)
+		err = json.NewEncoder(&buf).Encode(want)
 		if err != nil {
 			t.Fatal(err)
 		}
