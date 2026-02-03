@@ -236,6 +236,50 @@ func (i *Item) Validate() error {
 }
 ```
 
+### Database-Dependent Validation
+
+For validations that require database queries (e.g., uniqueness checks, foreign key existence), implement the `ValidatableWithDB` interface:
+
+```go
+type ValidatableWithDB interface {
+    ValidateWithDB(ctx context.Context, db DBQuerier) error
+}
+```
+
+The `DBQuerier` interface provides query capabilities:
+
+```go
+type DBQuerier interface {
+    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+    QueryRowContext(ctx context.Context, query string, args ...any) Row
+}
+```
+
+Example — checking for duplicate names:
+
+```go
+func (i *Item) ValidateWithDB(ctx context.Context, db gocrud.DBQuerier) error {
+    var exists bool
+    row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
+    if err := row.Scan(&exists); err != nil {
+        return err
+    }
+    if exists {
+        return errors.New("name already exists")
+    }
+    return nil
+}
+```
+
+Use `RegisterCreateWithDB` and `RegisterUpdateWithDB` to enable database-dependent validation:
+
+```go
+gocrud.RegisterCreateWithDB("POST /items", mux, repo.Create, db, errw)
+gocrud.RegisterUpdateWithDB("POST /items/{id}", mux, repo.Update, db, errw)
+```
+
+Both `Validatable.Validate()` and `ValidatableWithDB.ValidateWithDB()` are called if implemented — basic validation runs first, then database validation.
+
 ## Notes
 Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
 Contributions, bug reports, and performance improvements are highly appreciated!

@@ -32,6 +32,18 @@ func (i *Item) Validate() error {
 	return nil
 }
 
+func (i *Item) ValidateWithDB(ctx context.Context, db DBQuerier) error {
+	var exists bool
+	row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
+	if err := row.Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return errors.New("name already exists")
+	}
+	return nil
+}
+
 type genericRepoMock[M Model] struct {
 	t      *testing.T
 	model  M
@@ -47,6 +59,38 @@ func (mock *genericRepoMock[M]) GetTable() string {
 func (mock *genericRepoMock[M]) Create(_ context.Context, in M) (int, error) {
 	assert.Equal(mock.t, mock.model, in)
 	return 1, nil
+}
+
+// mockRow implements the Row interface for testing
+type mockRow struct {
+	exists bool
+	err    error
+}
+
+func (r *mockRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) > 0 {
+		if b, ok := dest[0].(*bool); ok {
+			*b = r.exists
+		}
+	}
+	return nil
+}
+
+// mockDBQuerier is a mock implementation of DBQuerier for testing
+type mockDBQuerier struct {
+	exists bool
+	err    error
+}
+
+func (m *mockDBQuerier) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, m.err
+}
+
+func (m *mockDBQuerier) QueryRowContext(_ context.Context, _ string, _ ...any) Row {
+	return &mockRow{exists: m.exists, err: m.err}
 }
 
 func TestMethod_Create(t *testing.T) {
@@ -110,6 +154,60 @@ func TestMethod_Create(t *testing.T) {
 
 		body := `{"name": ""}`
 		req := httptest.NewRequest(http.MethodPost, "/item", bytes.NewReader([]byte(body)))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+		errMsg, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "validation error\n", string(errMsg))
+	})
+
+	t.Run("Test CreateWithDB - success", func(t *testing.T) {
+		want := &Item{
+			ID:   1,
+			Name: "test",
+		}
+
+		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		mux := http.NewServeMux()
+		RegisterCreateWithDB("POST /item", mux, repo.Create, &mockDBQuerier{}, DefaultErrorWriter{})
+
+		var buf bytes.Buffer
+		err := json.NewEncoder(&buf).Encode(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/item", &buf)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusCreated, res.StatusCode)
+	})
+
+	t.Run("Test CreateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
+		want := &Item{
+			ID:   1,
+			Name: "test",
+		}
+
+		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		mux := http.NewServeMux()
+		RegisterCreateWithDB("POST /item", mux, repo.Create, &mockDBQuerier{exists: true}, DefaultErrorWriter{})
+
+		var buf bytes.Buffer
+		err := json.NewEncoder(&buf).Encode(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/item", &buf)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
@@ -357,7 +455,7 @@ func (mock *genericRepoMock[M]) Update(context.Context, M, int) error {
 	return nil
 }
 
-func TestMethod_Update(t *testing.T) {
+func TestMethod_Update(t *testing.T) { // nolint:cyclop
 	t.Run("Test generic method: Update()", func(t *testing.T) {
 		want := &Item{
 			ID:   1,
@@ -484,6 +582,60 @@ func TestMethod_Update(t *testing.T) {
 
 		body := `{"name": ""}`
 		req := httptest.NewRequest(http.MethodPost, "/item/1", bytes.NewReader([]byte(body)))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+
+		errMsg, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "validation error\n", string(errMsg))
+	})
+
+	t.Run("Test UpdateWithDB - success", func(t *testing.T) {
+		want := &Item{
+			ID:   1,
+			Name: "test",
+		}
+
+		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		mux := http.NewServeMux()
+		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, &mockDBQuerier{}, DefaultErrorWriter{})
+
+		var buf bytes.Buffer
+		err := json.NewEncoder(&buf).Encode(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/item/1", &buf)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		res := rec.Result()
+		assert.Equal(t, http.StatusOK, res.StatusCode)
+	})
+
+	t.Run("Test UpdateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
+		want := &Item{
+			ID:   1,
+			Name: "test",
+		}
+
+		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
+		mux := http.NewServeMux()
+		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, &mockDBQuerier{exists: true}, DefaultErrorWriter{})
+
+		var buf bytes.Buffer
+		err := json.NewEncoder(&buf).Encode(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/item/1", &buf)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
