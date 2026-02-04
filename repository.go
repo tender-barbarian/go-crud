@@ -31,6 +31,10 @@ func (r *Repository[M]) GetTable() string {
 	return r.table
 }
 
+func (r *Repository[M]) GetDB() *sql.DB {
+	return r.db
+}
+
 func (r *Repository[M]) set(fields []string, scan func(dest ...any) error, model M) error {
 	validate := model.StructToMap(model)
 

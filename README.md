@@ -240,6 +240,12 @@ gocrud.RegisterCreate("POST /items", mux, repo.Create, nil, eh)  // no DB valida
 gocrud.RegisterCreate("POST /items", mux, repo.Create, db, eh)   // with DB validation
 ```
 
+You can also use the repository's `GetDB()` helper to retrieve the database connection:
+
+```go
+gocrud.RegisterCreate("POST /items", mux, repo.Create, repo.GetDB(), eh)
+```
+
 When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body by default. Models that don't implement `Validatable` skip validation.
 
 To customize the error message and HTTP status code, implement the `ValidationError` interface on your error:
