@@ -122,3 +122,37 @@ func TestRemoveCreatedAtFields(t *testing.T) {
 		t.Error("updated_at field should not be removed")
 	}
 }
+
+func TestSetCreatedAt_NullTime(t *testing.T) {
+	var nt NullTime
+	m := map[string]any{
+		"created_at": &nt,
+	}
+
+	now := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	setCreatedAt(m, now)
+
+	if !nt.Valid {
+		t.Error("expected NullTime.Valid to be true")
+	}
+	if !nt.Time.Equal(now) {
+		t.Errorf("expected %v, got %v", now, nt.Time)
+	}
+}
+
+func TestSetUpdatedAt_NullTime(t *testing.T) {
+	var nt NullTime
+	m := map[string]any{
+		"updated_at": &nt,
+	}
+
+	now := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	setUpdatedAt(m, now)
+
+	if !nt.Valid {
+		t.Error("expected NullTime.Valid to be true")
+	}
+	if !nt.Time.Equal(now) {
+		t.Errorf("expected %v, got %v", now, nt.Time)
+	}
+}
