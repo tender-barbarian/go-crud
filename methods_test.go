@@ -27,22 +27,22 @@ type Item struct {
 	Reflection
 }
 
-func (i *Item) Validate() error {
+func (i *Item) Validate(ctx context.Context, db DBQuerier) error {
 	if i.Name == "" {
 		return errors.New("name is required")
 	}
-	return nil
-}
 
-func (i *Item) ValidateWithDB(ctx context.Context, db DBQuerier) error {
-	var exists bool
-	row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)", i.Name)
-	if err := row.Scan(&exists); err != nil {
-		return err
+	if db != nil {
+		var exists bool
+		row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)", i.Name)
+		if err := row.Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return errors.New("name already exists")
+		}
 	}
-	if exists {
-		return errors.New("name already exists")
-	}
+
 	return nil
 }
 
@@ -63,41 +63,6 @@ func (mock *genericRepoMock[M]) Create(_ context.Context, in M) (int, error) {
 	return 1, nil
 }
 
-// // mockRow implements the Row interface for testing
-// type mockRow struct {
-// 	exists bool
-// 	err    error
-// }
-
-// func (r *mockRow) Scan(dest ...any) error {
-// 	if r.err != nil {
-// 		return r.err
-// 	}
-// 	if len(dest) > 0 {
-// 		if b, ok := dest[0].(*bool); ok {
-// 			*b = r.exists
-// 		}
-// 	}
-// 	return nil
-// }
-
-// // mockDBQuerier is a mock implementation of DBQuerier for testing
-// type mockDBQuerier struct {
-// 	exists bool
-// 	err    error
-// }
-
-// func (m *mockDBQuerier) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
-// 	return nil, m.err
-// }
-
-// func (m *mockDBQuerier) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
-// 	rows := sqlmock.NewRows([]string{"id", "name"}).
-// 		AddRow("1", "test")
-
-// 	return rows.
-// }
-
 func TestMethod_Create(t *testing.T) {
 	t.Run("Test generic method: Create()", func(t *testing.T) {
 		want := &Item{
@@ -111,7 +76,7 @@ func TestMethod_Create(t *testing.T) {
 
 		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorWriter{})
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -135,7 +100,7 @@ func TestMethod_Create(t *testing.T) {
 	t.Run("Test generic method: Create() - empty body", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{table: "item"}
 		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorWriter{})
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodPost, "/item", nil)
 		rec := httptest.NewRecorder()
@@ -155,7 +120,7 @@ func TestMethod_Create(t *testing.T) {
 	t.Run("Test generic method: Create() - validation fails", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{table: "item"}
 		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorWriter{})
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
 
 		body := `{"name": ""}`
 		req := httptest.NewRequest(http.MethodPost, "/item", bytes.NewReader([]byte(body)))
@@ -193,7 +158,7 @@ func TestMethod_Create(t *testing.T) {
 		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
 
 		mux := http.NewServeMux()
-		RegisterCreateWithDB("POST /item", mux, repo.Create, db, DefaultErrorWriter{})
+		RegisterCreate("POST /item", mux, repo.Create, db, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err = json.NewEncoder(&buf).Encode(want)
@@ -233,7 +198,7 @@ func TestMethod_Create(t *testing.T) {
 		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
 
 		mux := http.NewServeMux()
-		RegisterCreateWithDB("POST /item", mux, repo.Create, db, DefaultErrorWriter{})
+		RegisterCreate("POST /item", mux, repo.Create, db, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err = json.NewEncoder(&buf).Encode(want)
@@ -279,7 +244,7 @@ func TestMethod_Get(t *testing.T) {
 
 		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorWriter{})
+		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -303,7 +268,7 @@ func TestMethod_Get(t *testing.T) {
 	t.Run("Test generic method: Get() - resource not found", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item", err: sql.ErrNoRows}
 		mux := http.NewServeMux()
-		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorWriter{})
+		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodGet, "/item/10", nil)
 		rec := httptest.NewRecorder()
@@ -323,7 +288,7 @@ func TestMethod_Get(t *testing.T) {
 	t.Run("Test generic method: Get() - invalid param", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorWriter{})
+		RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodGet, "/item/asd", nil)
 		rec := httptest.NewRecorder()
@@ -374,7 +339,7 @@ func TestMethod_GetAll(t *testing.T) {
 
 		repo := &genericRepoMock[*Item]{t: t, models: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, DefaultErrorWriter{})
+		RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -398,7 +363,7 @@ func TestMethod_GetAll(t *testing.T) {
 	t.Run("Test generic method: GetAll() - resource not found", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item", err: sql.ErrNoRows}
 		mux := http.NewServeMux()
-		RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, DefaultErrorWriter{})
+		RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodGet, "/item", nil)
 		rec := httptest.NewRecorder()
@@ -428,7 +393,7 @@ func TestMethod_Delete(t *testing.T) {
 	t.Run("Test generic method: Delete()", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorWriter{})
+		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodDelete, "/item/1", nil)
 		rec := httptest.NewRecorder()
@@ -442,7 +407,7 @@ func TestMethod_Delete(t *testing.T) {
 	t.Run("Test generic method: Delete() - resource not found", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item", err: sql.ErrNoRows}
 		mux := http.NewServeMux()
-		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorWriter{})
+		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodDelete, "/item/1", nil)
 		rec := httptest.NewRecorder()
@@ -463,7 +428,7 @@ func TestMethod_Delete(t *testing.T) {
 	t.Run("Test generic method: Delete() - invalid param", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorWriter{})
+		RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodDelete, "/item/asd", nil)
 		rec := httptest.NewRecorder()
@@ -502,7 +467,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 
 		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorWriter{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -531,7 +496,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 
 		repo := &genericRepoMock[*Item]{table: "item", err: sql.ErrNoRows}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorWriter{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -557,7 +522,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 	t.Run("Test generic method: Update() - empty body", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorWriter{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodPost, "/item/1", nil)
 		rec := httptest.NewRecorder()
@@ -586,7 +551,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 
 		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorWriter{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -612,7 +577,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 	t.Run("Test generic method: Update() - validation fails", func(t *testing.T) {
 		repo := &genericRepoMock[*Item]{table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate("POST /item/{id}", mux, repo.Update, DefaultErrorWriter{})
+		RegisterUpdate("POST /item/{id}", mux, repo.Update, nil, DefaultErrorHandler{})
 
 		body := `{"name": ""}`
 		req := httptest.NewRequest(http.MethodPost, "/item/1", bytes.NewReader([]byte(body)))
@@ -650,7 +615,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
 
 		mux := http.NewServeMux()
-		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, db, DefaultErrorWriter{})
+		RegisterUpdate("POST /item/{id}", mux, repo.Update, db, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err = json.NewEncoder(&buf).Encode(want)
@@ -690,7 +655,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
 
 		mux := http.NewServeMux()
-		RegisterUpdateWithDB("POST /item/{id}", mux, repo.Update, db, DefaultErrorWriter{})
+		RegisterUpdate("POST /item/{id}", mux, repo.Update, db, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err = json.NewEncoder(&buf).Encode(want)

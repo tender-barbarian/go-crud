@@ -13,7 +13,13 @@ import (
 // Validatable is an optional interface that models can implement
 // to enable automatic validation after JSON decoding.
 type Validatable interface {
-	Validate() error
+	Validate(ctx context.Context, db DBQuerier) error
+}
+
+// DBQuerier provides database query capabilities for validation.
+type DBQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // ValidationError is an optional interface that validation errors can implement
@@ -24,35 +30,23 @@ type ValidationError interface {
 	StatusCode() int
 }
 
-// DBQuerier provides database query capabilities for validation.
-type DBQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-// ValidatableWithDB is an optional interface that models can implement
-// to enable database-dependent validation after JSON decoding.
-type ValidatableWithDB interface {
-	ValidateWithDB(ctx context.Context, db DBQuerier) error
-}
-
-func handleValidationError(err error, w http.ResponseWriter, r *http.Request, errw ErrorWriter) {
+func handleValidationError(err error, w http.ResponseWriter, r *http.Request, eh ErrorHandler) {
 	msg := "validation error"
 	code := http.StatusBadRequest
 	if ve, ok := err.(ValidationError); ok {
 		msg = ve.Message()
 		code = ve.StatusCode()
 	}
-	errw.WriteError(w, r, err, msg, code)
+	eh.WriteError(w, r, err, msg, code)
 }
 
-type ErrorWriter interface {
+type ErrorHandler interface {
 	WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
 }
 
-type DefaultErrorWriter struct{}
+type DefaultErrorHandler struct{}
 
-func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
+func (d DefaultErrorHandler) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
 	if customMsg != "" {
 		http.Error(w, customMsg, statusCode)
 		return
@@ -60,26 +54,26 @@ func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, e
 	http.Error(w, err.Error(), statusCode)
 }
 
-func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), errw ErrorWriter) {
+func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), db DBQuerier, eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(); err != nil {
-				handleValidationError(err, w, r, errw)
+			if err := v.Validate(r.Context(), db); err != nil {
+				handleValidationError(err, w, r, eh)
 				return
 			}
 		}
 
 		out, err := f(r.Context(), in)
 		if err != nil {
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -93,61 +87,21 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 	})
 }
 
-func RegisterCreateWithDB[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), db DBQuerier, errw ErrorWriter) {
-	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		var in In
-
-		err := json.NewDecoder(r.Body).Decode(&in)
-		if err != nil {
-			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
-			return
-		}
-
-		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(); err != nil {
-				handleValidationError(err, w, r, errw)
-				return
-			}
-		}
-
-		if v, ok := any(in).(ValidatableWithDB); ok {
-			if err := v.ValidateWithDB(r.Context(), db); err != nil {
-				handleValidationError(err, w, r, errw)
-				return
-			}
-		}
-
-		out, err := f(r.Context(), in)
-		if err != nil {
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		err = json.NewEncoder(w).Encode(map[string]interface{}{"id": out})
-		if err != nil {
-			log.Printf("failed to encode output: %v", err)
-			return
-		}
-	})
-}
-
-func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, id int) (Out, error), errw ErrorWriter) {
+func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, id int) (Out, error), eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		out, err := f(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
+				eh.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -161,15 +115,15 @@ func RegisterGet[Out Model](pattern string, mux *http.ServeMux, f func(ctx conte
 	})
 }
 
-func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.Context) ([]Out, error), errw ErrorWriter) {
+func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.Context) ([]Out, error), eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		out, err := f(r.Context())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
+				eh.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -183,21 +137,21 @@ func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.
 	})
 }
 
-func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, int) error, errw ErrorWriter) {
+func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, int) error, eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		err = f(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
+				eh.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 
@@ -206,81 +160,36 @@ func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, 
 	})
 }
 
-func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, errw ErrorWriter) {
+func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, db DBQuerier, eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
 		err := json.NewDecoder(r.Body).Decode(&in)
 		if err != nil {
-			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
 		}
 
 		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(); err != nil {
-				handleValidationError(err, w, r, errw)
+			if err := v.Validate(r.Context(), db); err != nil {
+				handleValidationError(err, w, r, eh)
 				return
 			}
 		}
 
 		id, err := strconv.Atoi(r.PathValue("id"))
 		if err != nil {
-			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
 			return
 		}
 
 		err = f(r.Context(), in, id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
+				eh.WriteError(w, r, err, "resource not found", http.StatusNotFound)
 				return
 			}
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-func RegisterUpdateWithDB[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, db DBQuerier, errw ErrorWriter) {
-	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-		var in In
-
-		err := json.NewDecoder(r.Body).Decode(&in)
-		if err != nil {
-			errw.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
-			return
-		}
-
-		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(); err != nil {
-				handleValidationError(err, w, r, errw)
-				return
-			}
-		}
-
-		if v, ok := any(in).(ValidatableWithDB); ok {
-			if err := v.ValidateWithDB(r.Context(), db); err != nil {
-				handleValidationError(err, w, r, errw)
-				return
-			}
-		}
-
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil {
-			errw.WriteError(w, r, err, "invalid param", http.StatusBadRequest)
-			return
-		}
-
-		err = f(r.Context(), in, id)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				errw.WriteError(w, r, err, "resource not found", http.StatusNotFound)
-				return
-			}
-			errw.WriteError(w, r, err, "", http.StatusBadRequest)
+			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}
 

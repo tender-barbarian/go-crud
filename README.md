@@ -130,31 +130,31 @@ Now, whenever the repository needs to return a `User`, it executes the callback 
 ```go
 mux := http.NewServeMux()
 repo := gocrud.NewGenericRepository(db, "items", func() *Item { return &Item{} })
-errw := gocrud.DefaultErrorWriter{}
+eh := gocrud.DefaultErrorHandler{}
 
-gocrud.RegisterCreate("POST /items", mux, repo.Create, errw)
-gocrud.RegisterGet("GET /items/{id}", mux, repo.Get, errw)
-gocrud.RegisterGetAll("GET /items", mux, repo.GetAll, errw)
-gocrud.RegisterDelete("DELETE /items/{id}", mux, repo.Delete, errw)
-gocrud.RegisterUpdate("POST /items/{id}", mux, repo.Update, errw)
+gocrud.RegisterCreate("POST /items", mux, repo.Create, db, eh)
+gocrud.RegisterGet("GET /items/{id}", mux, repo.Get, eh)
+gocrud.RegisterGetAll("GET /items", mux, repo.GetAll, eh)
+gocrud.RegisterDelete("DELETE /items/{id}", mux, repo.Delete, eh)
+gocrud.RegisterUpdate("POST /items/{id}", mux, repo.Update, db, eh)
 ```
 
 ### Custom Error Handling
 
-The `ErrorWriter` interface allows you to customize how errors are returned to clients:
+The `ErrorHandler` interface allows you to customize how errors are returned to clients:
 
 ```go
-type ErrorWriter interface {
+type ErrorHandler interface {
     WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
 }
 ```
 
-The `DefaultErrorWriter` uses the custom message if provided, otherwise falls back to `err.Error()`:
+The `DefaultErrorHandler` uses the custom message if provided, otherwise falls back to `err.Error()`:
 
 ```go
-type DefaultErrorWriter struct{}
+type DefaultErrorHandler struct{}
 
-func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
+func (d DefaultErrorHandler) WriteError(w http.ResponseWriter, _ *http.Request, err error, customMsg string, statusCode int) {
     if customMsg != "" {
         http.Error(w, customMsg, statusCode)
         return
@@ -163,14 +163,14 @@ func (d DefaultErrorWriter) WriteError(w http.ResponseWriter, _ *http.Request, e
 }
 ```
 
-To implement custom error handling (e.g., JSON responses, logging), create your own type that implements `ErrorWriter`:
+To implement custom error handling (e.g., JSON responses, logging), create your own type that implements `ErrorHandler`:
 
 ```go
-type JSONErrorWriter struct {
+type JSONErrorHandler struct {
     Logger *log.Logger
 }
 
-func (j JSONErrorWriter) WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int) {
+func (j JSONErrorHandler) WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int) {
     j.Logger.Printf("error: %v", err)
 
     msg := customMsg
@@ -190,11 +190,20 @@ Models can optionally implement the `Validatable` interface to enable automatic 
 
 ```go
 type Validatable interface {
-    Validate() error
+    Validate(ctx context.Context, db DBQuerier) error
 }
 ```
 
-Example:
+The `DBQuerier` interface provides database query capabilities for validations that need them:
+
+```go
+type DBQuerier interface {
+    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+```
+
+Example — basic validation and uniqueness check:
 
 ```go
 type Item struct {
@@ -203,15 +212,35 @@ type Item struct {
     gocrud.Reflection
 }
 
-func (i *Item) Validate() error {
+func (i *Item) Validate(ctx context.Context, db gocrud.DBQuerier) error {
     if i.Name == "" {
         return errors.New("name is required")
     }
+
+    // Database validation (only if db is provided)
+    if db != nil {
+        var exists bool
+        row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
+        if err := row.Scan(&exists); err != nil {
+            return err
+        }
+        if exists {
+            return errors.New("name already exists")
+        }
+    }
+
     return nil
 }
 ```
 
-When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body by default. Models that don't implement `Validatable` skip validation (backward compatible).
+Pass `nil` for the `db` parameter if your model doesn't need database validation:
+
+```go
+gocrud.RegisterCreate("POST /items", mux, repo.Create, nil, eh)  // no DB validation
+gocrud.RegisterCreate("POST /items", mux, repo.Create, db, eh)   // with DB validation
+```
+
+When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body by default. Models that don't implement `Validatable` skip validation.
 
 To customize the error message and HTTP status code, implement the `ValidationError` interface on your error:
 
@@ -228,57 +257,13 @@ func (e NameRequiredError) Error() string      { return "name is required" }
 func (e NameRequiredError) Message() string    { return "name field cannot be empty" }
 func (e NameRequiredError) StatusCode() int    { return http.StatusUnprocessableEntity }
 
-func (i *Item) Validate() error {
+func (i *Item) Validate(ctx context.Context, db gocrud.DBQuerier) error {
     if i.Name == "" {
         return NameRequiredError{}
     }
     return nil
 }
 ```
-
-### Database-Dependent Validation
-
-For validations that require database queries (e.g., uniqueness checks, foreign key existence), implement the `ValidatableWithDB` interface:
-
-```go
-type ValidatableWithDB interface {
-    ValidateWithDB(ctx context.Context, db DBQuerier) error
-}
-```
-
-The `DBQuerier` interface provides query capabilities:
-
-```go
-type DBQuerier interface {
-    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-    QueryRowContext(ctx context.Context, query string, args ...any) Row
-}
-```
-
-Example — checking for duplicate names:
-
-```go
-func (i *Item) ValidateWithDB(ctx context.Context, db gocrud.DBQuerier) error {
-    var exists bool
-    row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
-    if err := row.Scan(&exists); err != nil {
-        return err
-    }
-    if exists {
-        return errors.New("name already exists")
-    }
-    return nil
-}
-```
-
-Use `RegisterCreateWithDB` and `RegisterUpdateWithDB` to enable database-dependent validation:
-
-```go
-gocrud.RegisterCreateWithDB("POST /items", mux, repo.Create, db, errw)
-gocrud.RegisterUpdateWithDB("POST /items/{id}", mux, repo.Update, db, errw)
-```
-
-Both `Validatable.Validate()` and `ValidatableWithDB.ValidateWithDB()` are called if implemented — basic validation runs first, then database validation.
 
 ## Notes
 Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
