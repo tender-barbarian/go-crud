@@ -1,12 +1,14 @@
 package gocrud
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -293,4 +295,122 @@ func TestIntegration_HTTP_UpdateInvalidJSON(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestItemWithTimestamps is a model with timestamp fields for testing
+type TestItemWithTimestamps struct {
+	ID        int       `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	Reflection
+}
+
+// setupTestDBWithTimestamps creates an in-memory SQLite database with timestamp columns
+func setupTestDBWithTimestamps(t *testing.T) *sql.DB {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE items_ts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return db
+}
+
+func TestIntegration_Create_SetsTimestamps(t *testing.T) {
+	db := setupTestDBWithTimestamps(t)
+	defer db.Close()
+
+	repo := NewGenericRepository(db, "items_ts", func() *TestItemWithTimestamps {
+		return &TestItemWithTimestamps{}
+	})
+
+	item := &TestItemWithTimestamps{Name: "Test Item"}
+
+	before := time.Now().Add(-time.Second)
+	id, err := repo.Create(context.Background(), item)
+	after := time.Now().Add(time.Second)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.CreatedAt.Before(before) || got.CreatedAt.After(after) {
+		t.Errorf("created_at %v not in expected range [%v, %v]",
+			got.CreatedAt, before, after)
+	}
+
+	if got.UpdatedAt.Before(before) || got.UpdatedAt.After(after) {
+		t.Errorf("updated_at %v not in expected range [%v, %v]",
+			got.UpdatedAt, before, after)
+	}
+}
+
+func TestIntegration_Update_SetsUpdatedAt_PreservesCreatedAt(t *testing.T) {
+	db := setupTestDBWithTimestamps(t)
+	defer db.Close()
+
+	repo := NewGenericRepository(db, "items_ts", func() *TestItemWithTimestamps {
+		return &TestItemWithTimestamps{}
+	})
+
+	// Create initial item
+	item := &TestItemWithTimestamps{Name: "Original"}
+	id, err := repo.Create(context.Background(), item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get original timestamps
+	original, err := repo.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCreatedAt := original.CreatedAt
+
+	// Wait to ensure time difference
+	time.Sleep(10 * time.Millisecond)
+
+	// Update the item
+	updateItem := &TestItemWithTimestamps{Name: "Updated"}
+	beforeUpdate := time.Now().Add(-time.Second)
+	err = repo.Update(context.Background(), updateItem, id)
+	afterUpdate := time.Now().Add(time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify timestamps
+	updated, err := repo.Get(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// created_at should be preserved (unchanged from original)
+	if !updated.CreatedAt.Equal(originalCreatedAt) {
+		t.Errorf("created_at changed: was %v, now %v",
+			originalCreatedAt, updated.CreatedAt)
+	}
+
+	// updated_at should be updated
+	if updated.UpdatedAt.Before(beforeUpdate) || updated.UpdatedAt.After(afterUpdate) {
+		t.Errorf("updated_at %v not in expected range [%v, %v]",
+			updated.UpdatedAt, beforeUpdate, afterUpdate)
+	}
 }

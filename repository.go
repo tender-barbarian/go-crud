@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 )
@@ -54,6 +55,10 @@ func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) {
 	defer r.mutex.Unlock()
 
 	m := model.StructToMap(model)
+
+	now := time.Now()
+	setCreatedAt(m, now)
+	setUpdatedAt(m, now)
 
 	columns := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -204,6 +209,9 @@ func (r *Repository[M]) Update(ctx context.Context, model M, id int) error {
 
 	m := model.StructToMap(model)
 	delete(m, "id")
+
+	setUpdatedAt(m, time.Now())
+	removeCreatedAtFields(m)
 
 	query, args, err := sq.Update(r.table).
 		SetMap(m).

@@ -65,6 +65,33 @@ type User struct {
 
 This is useful when your database column names don't match your Go field names (e.g., snake_case columns with PascalCase fields).
 
+### Automatic Timestamps
+
+`go-crud` automatically handles `created_at` and `updated_at` timestamp fields:
+
+| Operation | `created_at` | `updated_at` |
+|-----------|--------------|--------------|
+| Create    | Set to now   | Set to now   |
+| Update    | Preserved    | Set to now   |
+
+Simply add `time.Time` fields to your model:
+
+```go
+type Item struct {
+    ID        int       `json:"id"`
+    Name      string    `json:"name"`
+    CreatedAt time.Time `json:"created_at" db:"created_at"`
+    UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+    gocrud.Reflection
+}
+```
+
+**Recognized field names:**
+- `created_at`, `createdat`, `created`
+- `updated_at`, `updatedat`, `updated`, `modified_at`, `modifiedat`
+
+Models without these fields continue to work unchanged.
+
 ---
 
 ### 2. Without Reflection
