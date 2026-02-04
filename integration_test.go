@@ -299,10 +299,10 @@ func TestIntegration_HTTP_UpdateInvalidJSON(t *testing.T) {
 
 // TestItemWithTimestamps is a model with timestamp fields for testing
 type TestItemWithTimestamps struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	CreatedAt NullTime `json:"created_at" db:"created_at"`
+	UpdatedAt NullTime `json:"updated_at" db:"updated_at"`
 	Reflection
 }
 
@@ -351,14 +351,14 @@ func TestIntegration_Create_SetsTimestamps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.CreatedAt.Before(before) || got.CreatedAt.After(after) {
+	if got.CreatedAt.Time.Before(before) || got.CreatedAt.Time.After(after) {
 		t.Errorf("created_at %v not in expected range [%v, %v]",
-			got.CreatedAt, before, after)
+			got.CreatedAt.Time, before, after)
 	}
 
-	if got.UpdatedAt.Before(before) || got.UpdatedAt.After(after) {
+	if got.UpdatedAt.Time.Before(before) || got.UpdatedAt.Time.After(after) {
 		t.Errorf("updated_at %v not in expected range [%v, %v]",
-			got.UpdatedAt, before, after)
+			got.UpdatedAt.Time, before, after)
 	}
 }
 
@@ -382,7 +382,7 @@ func TestIntegration_Update_SetsUpdatedAt_PreservesCreatedAt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalCreatedAt := original.CreatedAt
+	originalCreatedAt := original.CreatedAt.Time
 
 	// Wait to ensure time difference
 	time.Sleep(10 * time.Millisecond)
@@ -403,14 +403,14 @@ func TestIntegration_Update_SetsUpdatedAt_PreservesCreatedAt(t *testing.T) {
 	}
 
 	// created_at should be preserved (unchanged from original)
-	if !updated.CreatedAt.Equal(originalCreatedAt) {
+	if !updated.CreatedAt.Time.Equal(originalCreatedAt) {
 		t.Errorf("created_at changed: was %v, now %v",
-			originalCreatedAt, updated.CreatedAt)
+			originalCreatedAt, updated.CreatedAt.Time)
 	}
 
 	// updated_at should be updated
-	if updated.UpdatedAt.Before(beforeUpdate) || updated.UpdatedAt.After(afterUpdate) {
+	if updated.UpdatedAt.Time.Before(beforeUpdate) || updated.UpdatedAt.Time.After(afterUpdate) {
 		t.Errorf("updated_at %v not in expected range [%v, %v]",
-			updated.UpdatedAt, beforeUpdate, afterUpdate)
+			updated.UpdatedAt.Time, beforeUpdate, afterUpdate)
 	}
 }

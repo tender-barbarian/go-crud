@@ -74,7 +74,7 @@ This is useful when your database column names don't match your Go field names (
 | Create    | Set to now   | Set to now   |
 | Update    | Preserved    | Set to now   |
 
-Simply add `time.Time` fields to your model:
+For **PostgreSQL** (native timestamp support), use `time.Time`:
 
 ```go
 type Item struct {
@@ -85,6 +85,23 @@ type Item struct {
     gocrud.Reflection
 }
 ```
+
+For **SQLite** (stores timestamps as strings), use `gocrud.NullTime`:
+
+```go
+type Item struct {
+    ID        int            `json:"id"`
+    Name      string         `json:"name"`
+    CreatedAt gocrud.NullTime `json:"created_at" db:"created_at"`
+    UpdatedAt gocrud.NullTime `json:"updated_at" db:"updated_at"`
+    gocrud.Reflection
+}
+
+// Access the time value via .Time field
+fmt.Println(item.CreatedAt.Time)
+```
+
+`NullTime` implements `sql.Scanner` and `driver.Valuer`, handling both native time values and string representations.
 
 **Recognized field names:**
 - `created_at`, `createdat`, `created`

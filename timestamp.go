@@ -21,26 +21,33 @@ var updatedAtFields = map[string]bool{
 }
 
 // setCreatedAt sets the created_at field to current time if it exists in the map
-// and the underlying value is a *time.Time pointer
+// and the underlying value is a *time.Time or *NullTime pointer
 func setCreatedAt(m map[string]any, now time.Time) {
 	for fieldName := range createdAtFields {
 		if ptr, ok := m[fieldName]; ok {
-			if timePtr, ok := ptr.(*time.Time); ok {
-				*timePtr = now
-			}
+			setTimeValue(ptr, now)
 		}
 	}
 }
 
 // setUpdatedAt sets the updated_at field to current time if it exists in the map
-// and the underlying value is a *time.Time pointer
+// and the underlying value is a *time.Time or *NullTime pointer
 func setUpdatedAt(m map[string]any, now time.Time) {
 	for fieldName := range updatedAtFields {
 		if ptr, ok := m[fieldName]; ok {
-			if timePtr, ok := ptr.(*time.Time); ok {
-				*timePtr = now
-			}
+			setTimeValue(ptr, now)
 		}
+	}
+}
+
+// setTimeValue sets the time value for either *time.Time or *NullTime
+func setTimeValue(ptr any, now time.Time) {
+	switch p := ptr.(type) {
+	case *time.Time:
+		*p = now
+	case *NullTime:
+		p.Time = now
+		p.Valid = true
 	}
 }
 
