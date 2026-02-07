@@ -167,6 +167,120 @@ Case in point:
 
 Now, whenever the repository needs to return a `User`, it executes the callback to allocate a new one.
 
+## Repository Hooks
+
+`go-crud` supports an opt-in hook system for validation, transformation, and mutation callbacks. Configure hooks using the builder pattern:
+
+```go
+repo := gocrud.NewGenericRepository(db, "users", func() *User { return &User{} }).
+    WithValidate().
+    WithTransform().
+    WithOnMutate(cacheInvalidator)
+```
+
+### Hook Execution Order
+
+For Create and Update operations:
+1. **Validate** - validates the model before persisting
+2. **Transform** - transforms/normalizes data
+3. **Database operation** - INSERT or UPDATE
+4. **OnMutate** - callback for side effects
+
+For Delete operations:
+1. **Database operation** - DELETE
+2. **OnMutate** - callback for side effects
+
+### Validation Hook
+
+Models can implement the `Validatable` interface to enable automatic validation:
+
+```go
+type Validatable interface {
+    validate(ctx context.Context, db DBQuerier) error
+}
+```
+
+Example with field validation and uniqueness check:
+
+```go
+func (u *User) validate(ctx context.Context, db gocrud.DBQuerier) error {
+    if u.Email == "" {
+        return errors.New("email is required")
+    }
+
+    // Check uniqueness
+    var exists bool
+    row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", u.Email)
+    if err := row.Scan(&exists); err != nil {
+        return err
+    }
+    if exists {
+        return errors.New("email already exists")
+    }
+
+    return nil
+}
+```
+
+Enable validation with `WithValidate()`:
+
+```go
+repo := gocrud.NewGenericRepository(db, "users", func() *User { return &User{} }).
+    WithValidate()
+```
+
+### Transformation Hook
+
+Models can implement the `Transformatable` interface to normalize/enrich data before persistence:
+
+```go
+type Transformatable interface {
+    transform(ctx context.Context) (Model, error)
+}
+```
+
+Example for normalizing email addresses:
+
+```go
+func (u *User) transform(ctx context.Context) (gocrud.Model, error) {
+    u.Email = strings.ToLower(strings.TrimSpace(u.Email))
+    u.Name = strings.TrimSpace(u.Name)
+    return u, nil
+}
+```
+
+Enable transformation with `WithTransform()`:
+
+```go
+repo := gocrud.NewGenericRepository(db, "users", func() *User { return &User{} }).
+    WithTransform()
+```
+
+### OnMutate Callback
+
+Register a callback to run after successful Create, Update, or Delete operations:
+
+```go
+cache := make(map[int]*User)
+
+repo := gocrud.NewGenericRepository(db, "users", func() *User { return &User{} }).
+    WithOnMutate(func(ctx context.Context) {
+        // Clear cache on any mutation
+        for k := range cache {
+            delete(cache, k)
+        }
+    })
+```
+
+Common use cases:
+- Cache invalidation
+- Publishing domain events
+- Updating search indices
+- Audit logging
+
+The callback does not return an error (best-effort execution).
+
+
 ## HTTP Route Registration
 
 `go-crud` provides helper functions to register HTTP handlers for your CRUD operations:
@@ -176,11 +290,11 @@ mux := http.NewServeMux()
 repo := gocrud.NewGenericRepository(db, "items", func() *Item { return &Item{} })
 eh := gocrud.DefaultErrorHandler{}
 
-gocrud.RegisterCreate("POST /items", mux, repo.Create, db, eh)
+gocrud.RegisterCreate("POST /items", mux, repo.Create, eh)
 gocrud.RegisterGet("GET /items/{id}", mux, repo.Get, eh)
 gocrud.RegisterGetAll("GET /items", mux, repo.GetAll, eh)
 gocrud.RegisterDelete("DELETE /items/{id}", mux, repo.Delete, eh)
-gocrud.RegisterUpdate("POST /items/{id}", mux, repo.Update, db, eh)
+gocrud.RegisterUpdate("POST /items/{id}", mux, repo.Update, eh)
 ```
 
 ### Custom Error Handling
@@ -228,93 +342,73 @@ func (j JSONErrorHandler) WriteError(w http.ResponseWriter, r *http.Request, err
 }
 ```
 
-### Input Validation
+## Complete Example
 
-Models can optionally implement the `Validatable` interface to enable automatic validation after JSON decoding in `RegisterCreate` and `RegisterUpdate`:
-
-```go
-type Validatable interface {
-    Validate(ctx context.Context, db DBQuerier) error
-}
-```
-
-The `DBQuerier` interface provides database query capabilities for validations that need them:
+Here's a full example combining hooks, HTTP handlers, and automatic timestamps:
 
 ```go
-type DBQuerier interface {
-    QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-    QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-```
-
-Example — basic validation and uniqueness check:
-
-```go
-type Item struct {
-    ID   int    `json:"id"`
-    Name string `json:"name"`
+type User struct {
+    ID        int            `json:"id"`
+    Email     string         `json:"email"`
+    Name      string         `json:"name"`
+    CreatedAt gocrud.NullTime `json:"created_at" db:"created_at"`
+    UpdatedAt gocrud.NullTime `json:"updated_at" db:"updated_at"`
     gocrud.Reflection
 }
 
-func (i *Item) Validate(ctx context.Context, db gocrud.DBQuerier) error {
-    if i.Name == "" {
-        return errors.New("name is required")
+// Validation hook
+func (u *User) validate(ctx context.Context, db gocrud.DBQuerier) error {
+    if u.Email == "" {
+        return errors.New("email is required")
     }
 
-    // Database validation (only if db is provided)
-    if db != nil {
-        var exists bool
-        row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM items WHERE name = ?)", i.Name)
-        if err := row.Scan(&exists); err != nil {
-            return err
-        }
-        if exists {
-            return errors.New("name already exists")
-        }
+    var exists bool
+    row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", u.Email)
+    if err := row.Scan(&exists); err != nil {
+        return err
+    }
+    if exists {
+        return errors.New("email already exists")
     }
 
     return nil
 }
-```
 
-Pass `nil` for the `db` parameter if your model doesn't need database validation:
-
-```go
-gocrud.RegisterCreate("POST /items", mux, repo.Create, nil, eh)  // no DB validation
-gocrud.RegisterCreate("POST /items", mux, repo.Create, db, eh)   // with DB validation
-```
-
-You can also use the repository's `GetDB()` helper to retrieve the database connection:
-
-```go
-gocrud.RegisterCreate("POST /items", mux, repo.Create, repo.GetDB(), eh)
-```
-
-When validation fails, the handler returns HTTP 400 Bad Request with "validation error" as the response body by default. Models that don't implement `Validatable` skip validation.
-
-To customize the error message and HTTP status code, implement the `ValidationError` interface on your error:
-
-```go
-type ValidationError interface {
-    error
-    Message() string
-    StatusCode() int
+// Transformation hook
+func (u *User) transform(ctx context.Context) (gocrud.Model, error) {
+    u.Email = strings.ToLower(strings.TrimSpace(u.Email))
+    u.Name = strings.TrimSpace(u.Name)
+    return u, nil
 }
 
-type NameRequiredError struct{}
+func main() {
+    db, _ := sql.Open("sqlite3", "app.db")
 
-func (e NameRequiredError) Error() string      { return "name is required" }
-func (e NameRequiredError) Message() string    { return "name field cannot be empty" }
-func (e NameRequiredError) StatusCode() int    { return http.StatusUnprocessableEntity }
+    // Setup repository with all hooks
+    cache := make(map[int]*User)
+    repo := gocrud.NewGenericRepository(db, "users", func() *User { return &User{} }).
+        WithValidate().
+        WithTransform().
+        WithOnMutate(func(ctx context.Context) {
+            for k := range cache {
+                delete(cache, k)
+            }
+        })
 
-func (i *Item) Validate(ctx context.Context, db gocrud.DBQuerier) error {
-    if i.Name == "" {
-        return NameRequiredError{}
-    }
-    return nil
+    // Register HTTP handlers
+    mux := http.NewServeMux()
+    eh := gocrud.DefaultErrorHandler{}
+
+    gocrud.RegisterCreate("POST /users", mux, repo.Create, eh)
+    gocrud.RegisterGet("GET /users/{id}", mux, repo.Get, eh)
+    gocrud.RegisterGetAll("GET /users", mux, repo.GetAll, eh)
+    gocrud.RegisterUpdate("POST /users/{id}", mux, repo.Update, eh)
+    gocrud.RegisterDelete("DELETE /users/{id}", mux, repo.Delete, eh)
+
+    http.ListenAndServe(":8080", mux)
 }
 ```
 
 ## Notes
-Currently tested primarily with SQLite but should be compatible with any SQL database supported by `database/sql`.
+Tested with both SQLite and PostgreSQL. Should be compatible with any SQL database supported by `database/sql`.
 Contributions, bug reports, and performance improvements are highly appreciated!

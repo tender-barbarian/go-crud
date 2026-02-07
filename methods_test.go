@@ -5,45 +5,25 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 )
 
 type Item struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Tag  string `json:"tag"`
-	Kind string `json:"kind"`
-	IP   string `json:"ip"`
+	ID        int      `json:"id"`
+	Name      string   `json:"name"`
+	Type      string   `json:"type"`
+	Tag       string   `json:"tag"`
+	Kind      string   `json:"kind"`
+	IP        string   `json:"ip"`
+	CreatedAt NullTime `json:"created_at" db:"created_at"`
+	UpdatedAt NullTime `json:"updated_at" db:"updated_at"`
 	Reflection
-}
-
-func (i *Item) Validate(ctx context.Context, db DBQuerier) error {
-	if i.Name == "" {
-		return errors.New("name is required")
-	}
-
-	if db != nil {
-		var exists bool
-		row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)", i.Name)
-		if err := row.Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return errors.New("name already exists")
-		}
-	}
-
-	return nil
 }
 
 type genericRepoMock[M Model] struct {
@@ -76,7 +56,7 @@ func TestMethod_Create(t *testing.T) {
 
 		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -98,9 +78,9 @@ func TestMethod_Create(t *testing.T) {
 	})
 
 	t.Run("Test generic method: Create() - empty body", func(t *testing.T) {
-		repo := &genericRepoMock[*Item]{table: "item"}
+		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
+		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodPost, "/item", nil)
 		rec := httptest.NewRecorder()
@@ -115,109 +95,6 @@ func TestMethod_Create(t *testing.T) {
 		}
 
 		assert.Equal(t, "invalid json\n", string(errMsg))
-	})
-
-	t.Run("Test generic method: Create() - validation fails", func(t *testing.T) {
-		repo := &genericRepoMock[*Item]{table: "item"}
-		mux := http.NewServeMux()
-		RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, DefaultErrorHandler{})
-
-		body := `{"name": ""}`
-		req := httptest.NewRequest(http.MethodPost, "/item", bytes.NewReader([]byte(body)))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
-
-		errMsg, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Equal(t, "validation error\n", string(errMsg))
-	})
-
-	t.Run("Test CreateWithDB - success", func(t *testing.T) { // nolint:dupl
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
-		}
-		defer db.Close()
-
-		want := &Item{
-			Name: "test 1",
-			Type: "test 2",
-			Tag:  "test 3",
-			Kind: "test 4",
-			IP:   "test 5",
-		}
-
-		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
-		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
-		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(false)
-		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
-
-		mux := http.NewServeMux()
-		RegisterCreate("POST /item", mux, repo.Create, db, DefaultErrorHandler{})
-
-		var buf bytes.Buffer
-		err = json.NewEncoder(&buf).Encode(want)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		mock.ExpectExec(`INSERT INTO item \(((ip)(,)?|(name)(,)?|(type)(,)?|(tag)(,)?|(kind)(,)?){5}\) VALUES \(([?,]+)\)`).
-			WillReturnResult(sqlmock.NewResult(1, 1))
-
-		req := httptest.NewRequest(http.MethodPost, "/item", &buf)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusCreated, res.StatusCode)
-	})
-
-	t.Run("Test CreateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
-		}
-		defer db.Close()
-
-		want := &Item{
-			Name: "test 1",
-			Type: "test 2",
-			Tag:  "test 3",
-			Kind: "test 4",
-			IP:   "test 5",
-		}
-
-		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
-		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
-		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(true)
-		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
-
-		mux := http.NewServeMux()
-		RegisterCreate("POST /item", mux, repo.Create, db, DefaultErrorHandler{})
-
-		var buf bytes.Buffer
-		err = json.NewEncoder(&buf).Encode(want)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		req := httptest.NewRequest(http.MethodPost, "/item", &buf)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
-
-		errMsg, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 }
 
@@ -467,7 +344,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 
 		repo := &genericRepoMock[*Item]{t: t, model: want, table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -494,9 +371,9 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 			IP:   "test 5",
 		}
 
-		repo := &genericRepoMock[*Item]{table: "item", err: sql.ErrNoRows}
+		repo := &genericRepoMock[*Item]{t: t, table: "item", err: sql.ErrNoRows}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -520,9 +397,9 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 	})
 
 	t.Run("Test generic method: Update() - empty body", func(t *testing.T) {
-		repo := &genericRepoMock[*Item]{table: "item"}
+		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorHandler{})
 
 		req := httptest.NewRequest(http.MethodPost, "/item/1", nil)
 		rec := httptest.NewRecorder()
@@ -551,7 +428,7 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 
 		repo := &genericRepoMock[*Item]{t: t, table: "item"}
 		mux := http.NewServeMux()
-		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, DefaultErrorHandler{})
+		RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, DefaultErrorHandler{})
 
 		var buf bytes.Buffer
 		err := json.NewEncoder(&buf).Encode(want)
@@ -572,108 +449,5 @@ func TestMethod_Update(t *testing.T) { // nolint:cyclop
 		}
 
 		assert.Equal(t, "invalid param\n", string(errMsg))
-	})
-
-	t.Run("Test generic method: Update() - validation fails", func(t *testing.T) {
-		repo := &genericRepoMock[*Item]{table: "item"}
-		mux := http.NewServeMux()
-		RegisterUpdate("POST /item/{id}", mux, repo.Update, nil, DefaultErrorHandler{})
-
-		body := `{"name": ""}`
-		req := httptest.NewRequest(http.MethodPost, "/item/1", bytes.NewReader([]byte(body)))
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
-
-		errMsg, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Equal(t, "validation error\n", string(errMsg))
-	})
-
-	t.Run("Test UpdateWithDB - success", func(t *testing.T) { // nolint:dupl
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
-		}
-		defer db.Close()
-
-		want := &Item{
-			Name: "test 1",
-			Type: "test 2",
-			Tag:  "test 3",
-			Kind: "test 4",
-			IP:   "test 5",
-		}
-
-		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
-		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
-		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(false)
-		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
-
-		mux := http.NewServeMux()
-		RegisterUpdate("POST /item/{id}", mux, repo.Update, db, DefaultErrorHandler{})
-
-		var buf bytes.Buffer
-		err = json.NewEncoder(&buf).Encode(want)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		mock.ExpectExec(`UPDATE item SET (\s?(kind = \?)(,)?|\s?(tag = \?)(,)?|\s?(ip = \?)(,)?|\s?(name = \?)(,)?|\s?(type = \?)(,)?){5} WHERE id = \?`).
-			WillReturnResult(sqlmock.NewResult(1, 1))
-
-		req := httptest.NewRequest(http.MethodPost, "/item/1", &buf)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusOK, res.StatusCode)
-	})
-
-	t.Run("Test UpdateWithDB - name already exist", func(t *testing.T) { // nolint:dupl
-		db, mock, err := sqlmock.New()
-		if err != nil {
-			t.Fatalf("an error '%s' was not expected when opening a stub database connection", err)
-		}
-		defer db.Close()
-
-		want := &Item{
-			Name: "test 1",
-			Type: "test 2",
-			Tag:  "test 3",
-			Kind: "test 4",
-			IP:   "test 5",
-		}
-
-		repo := NewGenericRepository(db, "item", func() *Item { return &Item{} })
-		validationQuery := regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM item WHERE name = ?)")
-		existsRows := sqlmock.NewRows([]string{"exists"}).AddRow(true)
-		mock.ExpectQuery(validationQuery).WithArgs(want.Name).WillReturnRows(existsRows)
-
-		mux := http.NewServeMux()
-		RegisterUpdate("POST /item/{id}", mux, repo.Update, db, DefaultErrorHandler{})
-
-		var buf bytes.Buffer
-		err = json.NewEncoder(&buf).Encode(want)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		req := httptest.NewRequest(http.MethodPost, "/item/1", &buf)
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, req)
-
-		res := rec.Result()
-		assert.Equal(t, http.StatusBadRequest, res.StatusCode)
-
-		errMsg, err := io.ReadAll(res.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		assert.Equal(t, "validation error\n", string(errMsg))
 	})
 }
