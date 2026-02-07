@@ -10,36 +10,6 @@ import (
 	"strconv"
 )
 
-// Validatable is an optional interface that models can implement
-// to enable automatic validation after JSON decoding.
-type Validatable interface {
-	Validate(ctx context.Context, db DBQuerier) error
-}
-
-// DBQuerier provides database query capabilities for validation.
-type DBQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-// ValidationError is an optional interface that validation errors can implement
-// to provide custom HTTP status codes and messages.
-type ValidationError interface {
-	error
-	Message() string
-	StatusCode() int
-}
-
-func handleValidationError(err error, w http.ResponseWriter, r *http.Request, eh ErrorHandler) {
-	msg := "validation error"
-	code := http.StatusBadRequest
-	if ve, ok := err.(ValidationError); ok {
-		msg = ve.Message()
-		code = ve.StatusCode()
-	}
-	eh.WriteError(w, r, err, msg, code)
-}
-
 type ErrorHandler interface {
 	WriteError(w http.ResponseWriter, r *http.Request, err error, customMsg string, statusCode int)
 }
@@ -54,7 +24,7 @@ func (d DefaultErrorHandler) WriteError(w http.ResponseWriter, _ *http.Request, 
 	http.Error(w, err.Error(), statusCode)
 }
 
-func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), db DBQuerier, eh ErrorHandler) {
+func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context.Context, In) (int, error), eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
@@ -62,13 +32,6 @@ func RegisterCreate[In Model](pattern string, mux *http.ServeMux, f func(context
 		if err != nil {
 			eh.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
-		}
-
-		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(r.Context(), db); err != nil {
-				handleValidationError(err, w, r, eh)
-				return
-			}
 		}
 
 		out, err := f(r.Context(), in)
@@ -160,7 +123,7 @@ func RegisterDelete(pattern string, mux *http.ServeMux, f func(context.Context, 
 	})
 }
 
-func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, db DBQuerier, eh ErrorHandler) {
+func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx context.Context, in In, id int) error, eh ErrorHandler) {
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		var in In
 
@@ -168,13 +131,6 @@ func RegisterUpdate[In Model](pattern string, mux *http.ServeMux, f func(ctx con
 		if err != nil {
 			eh.WriteError(w, r, err, "invalid json", http.StatusBadRequest)
 			return
-		}
-
-		if v, ok := any(in).(Validatable); ok {
-			if err := v.Validate(r.Context(), db); err != nil {
-				handleValidationError(err, w, r, eh)
-				return
-			}
 		}
 
 		id, err := strconv.Atoi(r.PathValue("id"))

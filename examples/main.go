@@ -71,11 +71,11 @@ func run() error {
 
 func registerGenericRoutes[M gocrud.Model](repo genericRepo[M], mux *http.ServeMux) *http.ServeMux {
 	eh := gocrud.DefaultErrorHandler{}
-	gocrud.RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, nil, eh)
+	gocrud.RegisterCreate(fmt.Sprintf("POST /%s", repo.GetTable()), mux, repo.Create, eh)
 	gocrud.RegisterGet(fmt.Sprintf("GET /%s/{id}", repo.GetTable()), mux, repo.Get, eh)
 	gocrud.RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, eh)
 	gocrud.RegisterDelete(fmt.Sprintf("DELETE /%s/{id}", repo.GetTable()), mux, repo.Delete, eh)
-	gocrud.RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, nil, eh)
+	gocrud.RegisterUpdate(fmt.Sprintf("POST /%s/{id}", repo.GetTable()), mux, repo.Update, eh)
 
 	mux.Handle("/", http.NotFoundHandler())
 

@@ -3,11 +3,23 @@ package gocrud
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
 )
+
+type DBQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+type Validatable interface {
+	validate(ctx context.Context, db DBQuerier) error
+}
+type Transformatable interface {
+	transform(ctx context.Context) (Model, error)
+}
 
 type Model interface {
 	StructToMap(d interface{}) map[string]any
@@ -18,14 +30,30 @@ type Repository[M Model] struct {
 	db              *sql.DB
 	getConcreteType func() M
 	table           string
+	validate        bool
+	onMutate        func(context.Context)
+	transform       bool
+}
+
+func (r *Repository[M]) WithValidate() *Repository[M] {
+	r.validate = true
+	return r
+}
+
+func (r *Repository[M]) WithOnMutate(fn func(context.Context)) *Repository[M] {
+	r.onMutate = fn
+	return r
+}
+
+func (r *Repository[M]) WithTransform() *Repository[M] {
+	r.transform = true
+	return r
 }
 
 func NewGenericRepository[M Model](db *sql.DB, table string, callback func() M) *Repository[M] {
-	return &Repository[M]{
-		db:              db,
-		getConcreteType: callback,
-		table:           table,
-	}
+	r := &Repository[M]{db: db, getConcreteType: callback, table: table}
+
+	return r
 }
 
 func (r *Repository[M]) GetTable() string {
@@ -50,9 +78,34 @@ func (r *Repository[M]) set(fields []string, scan func(dest ...any) error, model
 	return scan(dest...)
 }
 
-func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) {
+func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) { // nolint:cyclop
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	if r.validate {
+		v, ok := any(model).(Validatable)
+		if ok {
+			err := v.validate(ctx, r.db)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
+
+	if r.transform {
+		v, ok := any(model).(Transformatable)
+		if ok {
+			transformedModel, err := v.transform(ctx)
+			if err != nil {
+				return 0, err
+			}
+
+			model, ok = transformedModel.(M)
+			if !ok {
+				return 0, fmt.Errorf("transform() must return model which will satisfy Model interface")
+			}
+		}
+	}
 
 	m := model.StructToMap(model)
 
@@ -88,6 +141,10 @@ func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) {
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, err
+	}
+
+	if r.onMutate != nil {
+		r.onMutate(ctx)
 	}
 
 	return int(id), nil
@@ -199,15 +256,48 @@ func (r *Repository[M]) Delete(ctx context.Context, id int) error {
 	}
 
 	_, err = r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if r.onMutate != nil {
+		r.onMutate(ctx)
+	}
+
+	return nil
 }
 
-func (r *Repository[M]) Update(ctx context.Context, model M, id int) error {
+func (r *Repository[M]) Update(ctx context.Context, model M, id int) error { // nolint:cyclop
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
+	if r.validate {
+		v, ok := any(model).(Validatable)
+		if ok {
+			err := v.validate(ctx, r.db)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if r.transform {
+		v, ok := any(model).(Transformatable)
+		if ok {
+			transformedModel, err := v.transform(ctx)
+			if err != nil {
+				return err
+			}
+
+			model, ok = transformedModel.(M)
+			if !ok {
+				return fmt.Errorf("transform() must return model which will satisfy Model interface")
+			}
+		}
+	}
+
 	m := model.StructToMap(model)
+
 	delete(m, "id")
 
 	setUpdatedAt(m, time.Now())
@@ -222,6 +312,13 @@ func (r *Repository[M]) Update(ctx context.Context, model M, id int) error {
 	}
 
 	_, err = r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if r.onMutate != nil {
+		r.onMutate(ctx)
+	}
+
+	return nil
 }
