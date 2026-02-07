@@ -10,21 +10,92 @@ import (
 	sq "github.com/Masterminds/squirrel"
 )
 
+// DBQuerier is an interface for database query operations.
+// It provides a subset of *sql.DB functionality to enable easier testing
+// and mocking in validation logic.
 type DBQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
+
+// Validatable is an interface that models can implement to provide custom validation logic.
+// The validate method is called automatically before Create and Update operations when
+// the repository is configured with WithValidate().
+//
+// The method receives a DBQuerier interface (compatible with *sql.DB) to allow database
+// queries for validation (e.g., checking uniqueness constraints).
+//
+// Example:
+//
+//	func (u *User) validate(ctx context.Context, db DBQuerier) error {
+//	    if u.Email == "" {
+//	        return errors.New("email is required")
+//	    }
+//	    // Check uniqueness
+//	    var exists bool
+//	    row := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", u.Email)
+//	    if err := row.Scan(&exists); err != nil {
+//	        return err
+//	    }
+//	    if exists {
+//	        return errors.New("email already exists")
+//	    }
+//	    return nil
+//	}
 type Validatable interface {
 	validate(ctx context.Context, db DBQuerier) error
 }
+
+// Transformatable is an interface that models can implement to transform data before
+// it is persisted to the database. The transform method is called after validation
+// but before the database operation when the repository is configured with WithTransform().
+//
+// The method must return a Model that satisfies the same type M as the repository.
+// Transformations are applied to both Create and Update operations.
+//
+// Common use cases:
+//   - Normalizing data (e.g., lowercasing email addresses)
+//   - Enriching data (e.g., setting default values)
+//   - Sanitizing input (e.g., trimming whitespace)
+//
+// Security note: Be cautious when implementing transform. Ensure that transformations
+// don't bypass intended security restrictions or modify sensitive fields unexpectedly.
+//
+// Example:
+//
+//	func (u *User) transform(ctx context.Context) (Model, error) {
+//	    u.Email = strings.ToLower(strings.TrimSpace(u.Email))
+//	    u.Name = strings.TrimSpace(u.Name)
+//	    return u, nil
+//	}
 type Transformatable interface {
 	transform(ctx context.Context) (Model, error)
 }
 
+// Model is the base interface that all repository models must implement.
+// It provides reflection capabilities to convert structs to maps for database operations.
 type Model interface {
 	StructToMap(d interface{}) map[string]any
 }
 
+// Repository is a generic CRUD repository for database operations.
+//
+// Thread Safety:
+// The repository uses a mutex to ensure thread-safe Create, Update, Delete, Get, and GetAll
+// operations. This prevents race conditions when multiple goroutines access the same
+// repository instance. However, this may become a bottleneck under very high concurrency.
+// Consider using separate repository instances per request if needed.
+//
+// Hook Execution Order:
+// For Create and Update operations, hooks execute in this order:
+//  1. Validate (if enabled via WithValidate)
+//  2. Transform (if enabled via WithTransform)
+//  3. Database operation (INSERT/UPDATE)
+//  4. OnMutate callback (if configured via WithOnMutate)
+//
+// For Delete operations:
+//  1. Database operation (DELETE)
+//  2. OnMutate callback (if configured)
 type Repository[M Model] struct {
 	mutex           sync.Mutex
 	db              *sql.DB
@@ -35,21 +106,84 @@ type Repository[M Model] struct {
 	transform       bool
 }
 
+// WithValidate enables validation for Create and Update operations.
+// When enabled, the repository will call the model's validate method (if it implements
+// Validatable) before persisting data to the database.
+//
+// If validation fails, the operation is aborted and the validation error is returned.
+//
+// Example:
+//
+//	repo := NewGenericRepository(db, "users", func() *User { return &User{} }).
+//	    WithValidate()
 func (r *Repository[M]) WithValidate() *Repository[M] {
 	r.validate = true
 	return r
 }
 
+// WithOnMutate registers a callback function that will be called after successful
+// Create, Update, and Delete operations. This is useful for side effects like
+// cache invalidation, event publishing, or audit logging.
+//
+// The callback is called after the database operation completes successfully.
+// It does not return an error - if the callback fails, it won't affect the
+// database operation (best-effort execution).
+//
+// Common use cases:
+//   - Cache invalidation
+//   - Publishing domain events
+//   - Updating search indices
+//   - Audit logging
+//
+// Example:
+//
+//	cache := make(map[int]*User)
+//	repo := NewGenericRepository(db, "users", func() *User { return &User{} }).
+//	    WithOnMutate(func(ctx context.Context) {
+//	        // Clear cache on any mutation
+//	        for k := range cache {
+//	            delete(cache, k)
+//	        }
+//	    })
 func (r *Repository[M]) WithOnMutate(fn func(context.Context)) *Repository[M] {
 	r.onMutate = fn
 	return r
 }
 
+// WithTransform enables transformation for Create and Update operations.
+// When enabled, the repository will call the model's transform method (if it implements
+// Transformatable) after validation but before persisting to the database.
+//
+// This allows you to normalize or enrich data before it's stored.
+//
+// Example:
+//
+//	repo := NewGenericRepository(db, "users", func() *User { return &User{} }).
+//	    WithTransform()
 func (r *Repository[M]) WithTransform() *Repository[M] {
 	r.transform = true
 	return r
 }
 
+// NewGenericRepository creates a new generic CRUD repository.
+//
+// Parameters:
+//   - db: The database connection
+//   - table: The name of the database table
+//   - callback: A factory function that returns a new instance of the model type
+//
+// The repository can be configured with optional hooks using the builder pattern:
+//
+//	repo := NewGenericRepository(db, "users", func() *User { return &User{} }).
+//	    WithValidate().
+//	    WithTransform().
+//	    WithOnMutate(cacheInvalidator)
+//
+// By default, the repository:
+//   - Does NOT validate models (use WithValidate to enable)
+//   - Does NOT transform models (use WithTransform to enable)
+//   - Does NOT call mutation callbacks (use WithOnMutate to register)
+//   - DOES automatically set created_at and updated_at timestamps if fields exist
 func NewGenericRepository[M Model](db *sql.DB, table string, callback func() M) *Repository[M] {
 	r := &Repository[M]{db: db, getConcreteType: callback, table: table}
 
