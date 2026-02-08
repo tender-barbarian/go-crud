@@ -28,7 +28,7 @@ type TestItem struct {
 	Reflection
 }
 
-func (ti *TestItem) validate(_ context.Context, _ DBQuerier) error {
+func (ti *TestItem) Validate(_ context.Context, _ DBQuerier) error {
 	if ti.Params != "" {
 		if !json.Valid([]byte(ti.Params)) {
 			return fmt.Errorf("params must be valid JSON")
@@ -38,7 +38,7 @@ func (ti *TestItem) validate(_ context.Context, _ DBQuerier) error {
 	return nil
 }
 
-func (ti *TestItem) transform(_ context.Context) (Model, error) {
+func (ti *TestItem) Transform(_ context.Context) (Model, error) {
 	if ti.Params != "" {
 		ti.Params = "transformed!"
 	}

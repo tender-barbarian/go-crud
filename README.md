@@ -196,14 +196,14 @@ Models can implement the `Validatable` interface to enable automatic validation:
 
 ```go
 type Validatable interface {
-    validate(ctx context.Context, db DBQuerier) error
+    Validate(ctx context.Context, db DBQuerier) error
 }
 ```
 
 Example with field validation and uniqueness check:
 
 ```go
-func (u *User) validate(ctx context.Context, db gocrud.DBQuerier) error {
+func (u *User) Validate(ctx context.Context, db gocrud.DBQuerier) error {
     if u.Email == "" {
         return errors.New("email is required")
     }
@@ -235,14 +235,14 @@ Models can implement the `Transformatable` interface to normalize/enrich data be
 
 ```go
 type Transformatable interface {
-    transform(ctx context.Context) (Model, error)
+    Transform(ctx context.Context) (Model, error)
 }
 ```
 
 Example for normalizing email addresses:
 
 ```go
-func (u *User) transform(ctx context.Context) (gocrud.Model, error) {
+func (u *User) Transform(ctx context.Context) (gocrud.Model, error) {
     u.Email = strings.ToLower(strings.TrimSpace(u.Email))
     u.Name = strings.TrimSpace(u.Name)
     return u, nil
@@ -357,7 +357,7 @@ type User struct {
 }
 
 // Validation hook
-func (u *User) validate(ctx context.Context, db gocrud.DBQuerier) error {
+func (u *User) Validate(ctx context.Context, db gocrud.DBQuerier) error {
     if u.Email == "" {
         return errors.New("email is required")
     }
@@ -375,7 +375,7 @@ func (u *User) validate(ctx context.Context, db gocrud.DBQuerier) error {
 }
 
 // Transformation hook
-func (u *User) transform(ctx context.Context) (gocrud.Model, error) {
+func (u *User) Transform(ctx context.Context) (gocrud.Model, error) {
     u.Email = strings.ToLower(strings.TrimSpace(u.Email))
     u.Name = strings.TrimSpace(u.Name)
     return u, nil
