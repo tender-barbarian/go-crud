@@ -43,7 +43,7 @@ type DBQuerier interface {
 //	    return nil
 //	}
 type Validatable interface {
-	validate(ctx context.Context, db DBQuerier) error
+	Validate(ctx context.Context, db DBQuerier) error
 }
 
 // Transformatable is an interface that models can implement to transform data before
@@ -69,7 +69,7 @@ type Validatable interface {
 //	    return u, nil
 //	}
 type Transformatable interface {
-	transform(ctx context.Context) (Model, error)
+	Transform(ctx context.Context) (Model, error)
 }
 
 // Model is the base interface that all repository models must implement.
@@ -219,7 +219,7 @@ func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) { // n
 	if r.validate {
 		v, ok := any(model).(Validatable)
 		if ok {
-			err := v.validate(ctx, r.db)
+			err := v.Validate(ctx, r.db)
 			if err != nil {
 				return 0, err
 			}
@@ -229,7 +229,7 @@ func (r *Repository[M]) Create(ctx context.Context, model M) (int, error) { // n
 	if r.transform {
 		v, ok := any(model).(Transformatable)
 		if ok {
-			transformedModel, err := v.transform(ctx)
+			transformedModel, err := v.Transform(ctx)
 			if err != nil {
 				return 0, err
 			}
@@ -408,7 +408,7 @@ func (r *Repository[M]) Update(ctx context.Context, model M, id int) error { // 
 	if r.validate {
 		v, ok := any(model).(Validatable)
 		if ok {
-			err := v.validate(ctx, r.db)
+			err := v.Validate(ctx, r.db)
 			if err != nil {
 				return err
 			}
@@ -418,7 +418,7 @@ func (r *Repository[M]) Update(ctx context.Context, model M, id int) error { // 
 	if r.transform {
 		v, ok := any(model).(Transformatable)
 		if ok {
-			transformedModel, err := v.transform(ctx)
+			transformedModel, err := v.Transform(ctx)
 			if err != nil {
 				return err
 			}
