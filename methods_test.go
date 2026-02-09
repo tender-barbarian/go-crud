@@ -238,7 +238,7 @@ func TestMethod_GetAll(t *testing.T) {
 	})
 
 	t.Run("Test generic method: GetAll() - resource not found", func(t *testing.T) {
-		repo := &genericRepoMock[*Item]{t: t, table: "item", err: sql.ErrNoRows}
+		repo := &genericRepoMock[*Item]{t: t, table: "item", models: nil}
 		mux := http.NewServeMux()
 		RegisterGetAll(fmt.Sprintf("GET /%s", repo.GetTable()), mux, repo.GetAll, DefaultErrorHandler{})
 
@@ -247,14 +247,14 @@ func TestMethod_GetAll(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 
 		res := rec.Result()
-		assert.Equal(t, 404, res.StatusCode)
+		assert.Equal(t, 200, res.StatusCode)
 
-		errMsg, err := io.ReadAll(res.Body)
+		msg, err := io.ReadAll(res.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		assert.Equal(t, "resource not found\n", string(errMsg))
+		assert.Equal(t, "null\n", string(msg))
 	})
 }
 

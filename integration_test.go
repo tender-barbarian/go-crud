@@ -395,7 +395,7 @@ func TestIntegration_HTTP_GetAll(t *testing.T) {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
 
-		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Equal(t, http.StatusOK, rec.Code)
 	})
 }
 

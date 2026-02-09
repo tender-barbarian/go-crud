@@ -186,7 +186,7 @@ func TestGenericRepository_GetAll(t *testing.T) {
 
 		var want []*ModelWithReflection
 		assert.Equal(t, want, got)
-		assert.Equal(t, sql.ErrNoRows, err)
+		assert.Equal(t, nil, err)
 	})
 
 	t.Run("Test Generic Repository: GetAll() - Without Reflection", func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestGenericRepository_GetAll(t *testing.T) {
 
 		var want []*ModelWithoutReflection
 		assert.Equal(t, want, got)
-		assert.Equal(t, sql.ErrNoRows, err)
+		assert.Equal(t, nil, err)
 	})
 }
 
