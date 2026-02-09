@@ -348,7 +348,7 @@ func (r *Repository[M]) GetAll(ctx context.Context) ([]M, error) {
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return []M{}, nil
 		}
 		return nil, err
 	}
