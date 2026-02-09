@@ -131,10 +131,6 @@ func RegisterGetAll[Out any](pattern string, mux *http.ServeMux, f func(context.
 	mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		out, err := f(r.Context())
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				eh.WriteError(w, r, err, "resource not found", http.StatusNotFound)
-				return
-			}
 			eh.WriteError(w, r, err, "", http.StatusBadRequest)
 			return
 		}

@@ -183,10 +183,11 @@ func TestGenericRepository_GetAll(t *testing.T) {
 
 		repo := NewGenericRepository(db, "table_name", func() *ModelWithReflection { return &ModelWithReflection{} })
 		got, err := repo.GetAll(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		var want []*ModelWithReflection
-		assert.Equal(t, want, got)
-		assert.Equal(t, sql.ErrNoRows, err)
+		assert.Empty(t, got)
 	})
 
 	t.Run("Test Generic Repository: GetAll() - Without Reflection", func(t *testing.T) {
@@ -240,10 +241,11 @@ func TestGenericRepository_GetAll(t *testing.T) {
 
 		repo := NewGenericRepository(db, "table_name", func() *ModelWithoutReflection { return &ModelWithoutReflection{} })
 		got, err := repo.GetAll(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		var want []*ModelWithoutReflection
-		assert.Equal(t, want, got)
-		assert.Equal(t, sql.ErrNoRows, err)
+		assert.Empty(t, got)
 	})
 }
 
